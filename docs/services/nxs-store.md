@@ -82,7 +82,7 @@ When payment stops, the storage node garbage-collects the data after a grace per
 
 ### Free Storage Between Trusted Peers
 
-Just like [relay traffic](../economics/community-zones), storage between trusted peers is **free**:
+Just like [relay traffic](../economics/trust-neighborhoods), storage between trusted peers is **free**:
 
 ```
 Storage decision:

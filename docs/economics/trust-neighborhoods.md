@@ -100,11 +100,11 @@ Carol sets:  community_label = "portland-mesh"
 ```
 
 This label is:
-- **Purely informational** — it has no protocol-level authority
-- **Self-assigned** — no one approves it
+- **Self-assigned** — no one approves it, no authority enforces uniqueness
+- **Not authoritative** — it carries no protocol-level privileges (it cannot grant access, waive fees, or modify trust)
 - **Not unique** — multiple disjoint clusters can use the same label
+- **Used by services** — [NXS-Name](../applications/naming) scopes human-readable names by label, [NXS-Pub](../services/nxs-pub) supports `Neighborhood(label)` subscriptions, and [NXS-DHT](../services/nxs-dht#neighborhood-scoped-dht) uses labels for content scoping
 - **Useful for discovery** — "find nodes labeled 'portland-mesh' near me"
-- **Useful for naming** — `alice@portland-mesh` resolves to the nearest cluster with that label
 
 Community labels enable human-readable naming and discovery without any of the governance overhead of explicit zones.
 

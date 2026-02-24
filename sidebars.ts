@@ -3,6 +3,7 @@ import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 const sidebars: SidebarsConfig = {
   docsSidebar: [
     'introduction',
+    'faq',
     {
       type: 'category',
       label: 'Protocol Stack',
@@ -21,7 +22,7 @@ const sidebars: SidebarsConfig = {
         'economics/nxs-token',
         'economics/payment-channels',
         'economics/crdt-ledger',
-        'economics/community-zones',
+        'economics/trust-neighborhoods',
         'economics/real-world-impact',
       ],
     },

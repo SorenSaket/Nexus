@@ -43,20 +43,57 @@ Header flags encode: propagation type (broadcast/transport), destination type (s
 
 **Critical property** (inherited from Reticulum): The source address is **NOT** in the header. Packets carry only the destination. Sender anonymity is structural.
 
-### NEXUS Extension: Cost Annotations
+### NEXUS Extension: Compact Path Cost
 
-NEXUS extends Reticulum announces with cost metadata appended to the announce payload:
+NEXUS extends announces with a constant-size cost summary that each relay updates in-place as it forwards the announce:
 
 ```
-CostAnnotation {
-    cost_per_byte: u64,          // what this relay charges
-    measured_latency_ms: u32,    // measured link latency
-    measured_bandwidth_bps: u64, // measured link throughput
-    signature: Ed25519Signature, // relay's signature over annotation
+CompactPathCost {
+    cumulative_cost: u16,    // log₂-encoded μNXS/byte (2 bytes)
+    worst_latency_ms: u16,   // max latency on any hop in path (2 bytes)
+    bottleneck_bps: u8,      // log₂-encoded min bandwidth on path (1 byte)
+    hop_count: u8,           // number of relays traversed (1 byte)
 }
+// Total: 6 bytes (constant, regardless of path length)
 ```
 
-Each relay node appends its own signed `CostAnnotation` to announces it forwards. Receiving nodes accumulate the full cost path.
+Each relay updates the running totals as it forwards:
+- `cumulative_cost += my_cost_per_byte` (re-encoded to log scale)
+- `worst_latency_ms = max(existing, my_measured_latency)`
+- `bottleneck_bps = min(existing, my_bandwidth)`
+- `hop_count += 1`
+
+**Log encoding for cost**: `encoded = round(16 × log₂(value + 1))`. A u16 covers the full practical cost range with ~6% precision per step.
+
+**Log encoding for bandwidth**: `encoded = round(8 × log₂(bps))`. A u8 covers 1 bps to ~10 Tbps with ~9% precision.
+
+The CompactPathCost is carried in the announce DATA field using a TLV envelope:
+
+```
+NexusExtension {
+    magic: u8 = 0x4E,           // 'N' — identifies NEXUS extension presence
+    version: u8,                 // extension format version
+    path_cost: CompactPathCost,  // 6 bytes
+    extensions: [{               // future extensions via TLV pairs
+        type: u8,
+        length: u8,
+        data: [u8; length],
+    }],
+}
+// Minimum size: 8 bytes (magic + version + path_cost)
+```
+
+Nodes that don't understand the `0x4E` magic byte forward the DATA field as opaque payload. NEXUS-aware nodes parse and update it.
+
+#### Why No Per-Relay Signatures
+
+Earlier designs signed each relay's cost annotation individually (~84 bytes per relay hop). This is unnecessary for three reasons:
+
+1. **Routing decisions are local.** You select a next-hop neighbor. You only need to trust your neighbor's cost claim — and your neighbor is already authenticated by the link-layer encryption.
+2. **Trust is transitive at each hop.** Your neighbor trusts *their* neighbor (link-authenticated), who trusts *their* neighbor, and so on. No node needs to verify claims from relays it has never communicated with.
+3. **The market enforces honesty.** A relay that inflates path costs gets routed around. A relay that deflates costs loses money on every packet. Economic incentives are a cheaper and more robust enforcement mechanism than cryptographic proofs for cost claims.
+
+The announce itself remains signed by the destination node (proving authenticity of the route). The path cost summary is trusted transitively through link-layer authentication at each hop — analogous to how BGP trusts direct peers, not every AS along the path.
 
 ## Routing
 
@@ -66,13 +103,15 @@ Routing is destination-based with cost annotations, formalized as **greedy forwa
 RoutingEntry {
     destination: DestinationHash,
     next_hop: InterfaceID + LinkAddress, // which interface, which neighbor
-    hops: u8,
 
-    // Cost annotations
-    cost_per_byte: u64,                  // cumulative routing cost
-    latency_ms: u32,                     // estimated end-to-end
-    bandwidth_bps: u64,                  // bottleneck bandwidth on path
-    reliability: f32,                    // path reliability estimate
+    // From CompactPathCost (6 bytes in announce)
+    cumulative_cost: u16,                // log₂-encoded μNXS/byte
+    worst_latency_ms: u16,              // max latency on path
+    bottleneck_bps: u8,                 // log₂-encoded min bandwidth
+    hop_count: u8,                      // relay count
+
+    // Locally computed
+    reliability: u8,                     // 0-255 (0=unknown, 255=perfect) — avoids FP on ESP32
 
     last_updated: Timestamp,
     expires: Timestamp,
@@ -104,8 +143,8 @@ At each hop, the current node selects the neighbor that minimizes a scoring func
 
 ```
 score(neighbor) = α · norm_ring_distance(neighbor, destination)
-                + β · norm_cost_per_byte(neighbor)
-                + γ · norm_latency_ms(neighbor)
+                + β · norm_cumulative_cost(neighbor)
+                + γ · norm_worst_latency(neighbor)
 ```
 
 Where `norm_*` normalizes each metric to `[0, 1]` across the candidate set. The weights α, β, γ are derived from the per-packet `PathPolicy`:
@@ -143,7 +182,7 @@ The announcement propagation itself creates the navigable topology. Each announc
 Path discovery works via announcements:
 
 1. A node announces its destination hash to the network, signed with its Ed25519 key
-2. The announcement propagates through the mesh via greedy forwarding, with each relay node appending its own signed cost/latency/bandwidth annotations
+2. The announcement propagates through the mesh via greedy forwarding, with each relay updating the [CompactPathCost](#nexus-extension-compact-path-cost) running totals in-place (no per-relay signatures — link-layer authentication is sufficient)
 3. Receiving nodes record the path (or multiple paths) and select based on the scoring function above
 4. Multiple paths are retained and scored — the best path per policy is used, with fallback to alternatives on failure
 
@@ -159,6 +198,28 @@ GossipRound (every 60 seconds with each neighbor):
 3. Exchange deltas (compact, only what's new)
 4. Apply received state via CRDT merge rules
 ```
+
+### Gossip Bloom Filter
+
+State summaries use a compact bloom filter to identify deltas without exchanging full state:
+
+```
+GossipFilter {
+    bits: [u8; N],          // N scales with known state entries
+    hash_count: 3,          // 3 independent hash functions (Blake3-derived)
+    target_fpr: 1%,         // 1% false positive rate (tolerant — FP only causes redundant delta)
+}
+```
+
+| Known state entries | Filter size | FPR |
+|-------------------|-------------|-----|
+| 100 | 120 bytes | ~1% |
+| 1,000 | 1.2 KB | ~1% |
+| 10,000 | 12 KB | ~1% |
+
+On constrained links (below 10 kbps), the filter is capped at 256 bytes — entries beyond the filter capacity are omitted (pull-only mode for Tiers 3-4 handles this). False positives are harmless: they cause a delta item to not be requested, but the item will be caught in the next round when the bloom filter is regenerated.
+
+**New node joining**: A node with empty state sends an all-zeros bloom filter. The neighbor detects maximum divergence and sends a prioritized subset of state (Tier 1 first, then Tier 2, etc.) spread across multiple gossip rounds to avoid link saturation.
 
 A single gossip round multiplexes all protocol state:
 - Routing announcements (with cost annotations)
@@ -194,6 +255,85 @@ Gossip Bandwidth Budget (per link):
 | 10+ Mbps WiFi | ~1% | ~1% | ~2% | ~2% | ~6% |
 
 This tiered model ensures constrained links are never overwhelmed by protocol overhead, while higher-bandwidth links gossip more aggressively for faster convergence.
+
+## Congestion Control
+
+User data has three layers of congestion control. Protocol gossip is handled separately by the [bandwidth budget](#bandwidth-budget).
+
+### Link-Level Collision Avoidance (CSMA/CA)
+
+On half-duplex links (LoRa, packet radio), mandatory listen-before-talk:
+
+```
+LinkTransmit(packet):
+  1. CAD scan (LoRa Channel Activity Detection, ~5ms)
+  2. If channel busy:
+       backoff = random(1, 2^attempt) × slot_time
+       slot_time = max_packet_airtime for this link
+                   (~200ms at 1 kbps for 500-byte MTU)
+  3. Max 7 backoff attempts → drop packet, signal congestion upstream
+  4. If channel clear → transmit
+```
+
+On full-duplex links (WiFi, Ethernet), the transport handles collision avoidance natively — this layer is a no-op.
+
+### Per-Neighbor Token Bucket
+
+Each outbound link enforces fair sharing across neighbors:
+
+```
+LinkBucket {
+    link_id: InterfaceID,
+    capacity_tokens: u32,        // link_bandwidth_bps × window_sec / 8
+    tokens: u32,                 // current available (1 token = 1 byte)
+    refill_rate: u32,            // bytes/sec = measured_bandwidth × (1 - protocol_overhead)
+    per_neighbor_share: Map<NodeID, u32>,
+}
+```
+
+Fair share is `link_bandwidth / num_active_neighbors` by default. Neighbors with active payment channels get share weighted proportionally to channel balance — paying for bandwidth earns proportional priority.
+
+When a neighbor exceeds its share, packets are queued (not dropped). If the queue exceeds a depth threshold, a backpressure signal is sent.
+
+### Priority Queuing
+
+Four priority levels for user data, scheduled with strict priority and starvation prevention (P3 guaranteed at least 10% of user bandwidth):
+
+| Priority | Traffic Type | Examples | Queue Policy |
+|----------|-------------|----------|--------------|
+| P0 | Real-time | Voice (Codec2), interactive control | Tail-drop at 500ms deadline |
+| P1 | Interactive | Messaging, DHT lookups, link establishment | FIFO, 5s max queue time |
+| P2 | Standard | Social posts, pub/sub, NXS-Name | FIFO, 30s max queue time |
+| P3 | Bulk | Storage replication, large file transfer | FIFO, unbounded patience |
+
+Within a priority level, round-robin across neighbors. On half-duplex links, preemption occurs at packet boundaries only.
+
+### Backpressure Signaling
+
+When an outbound queue exceeds 50% capacity, a 1-hop signal is sent to upstream neighbors:
+
+```
+CongestionSignal {
+    link_id: u8,              // which outbound link is congested
+    severity: enum {
+        Moderate,             // reduce sending rate by 25%
+        Severe,               // reduce by 50%, reroute P2/P3 traffic
+        Saturated,            // stop P2/P3, throttle P1, P0 only
+    },
+    estimated_drain_ms: u16,  // estimated time until queue drains
+}
+// Total: 4 bytes
+```
+
+### Dynamic Cost Response
+
+Congestion increases the effective cost of a link. When queue depth exceeds 50%:
+
+```
+effective_cost = base_cost × (1 + (queue_depth / queue_capacity)²)
+```
+
+The quadratic term ensures gentle increase at moderate load and sharp increase near saturation. The updated cost propagates in the next gossip round's CompactPathCost, causing upstream nodes to naturally reroute traffic to less-congested paths. This is a local decision — no protocol extension beyond normal cost updates.
 
 ## Time Model
 

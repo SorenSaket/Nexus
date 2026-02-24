@@ -41,10 +41,23 @@ This is store-and-forward messaging — similar to email, but encrypted and dece
 
 Group messages use shared symmetric keys managed by an NXS-Compute contract:
 
-- A group key is generated and shared with all members
-- The contract handles key rotation when members join or leave
-- Messages are encrypted with the current group key
-- All members can decrypt; non-members cannot
+```
+GroupState {
+    group_id: Blake3Hash,
+    members: Set<NodeID>,
+    current_key: ChaCha20Key,        // current group symmetric key
+    key_epoch: u64,                   // increments on every rotation
+    admin: NodeID,                    // creator; can add/remove members
+}
+```
+
+### Key Management
+
+- **Creation**: The group creator generates the first symmetric key and encrypts it individually for each member's public key (standard E2E envelope per member)
+- **Rotation**: When a member joins or leaves, the admin generates a new key and distributes it to all current members. The key epoch increments. Old keys are retained locally so members can decrypt historical messages
+- **No forward secrecy for groups**: A new member receives only the current key — they cannot decrypt messages sent before they joined. A removed member retains old keys for messages they already received but cannot decrypt new messages (new key was never sent to them)
+- **Maximum group size**: Practical limit of ~100 members, constrained by key distribution bandwidth (each rotation sends one E2E-encrypted key envelope per member, ~100 bytes each)
+- **Admin offline**: If the admin goes offline, the group continues with the current key. No new members can be added and no key rotation occurs until the admin returns. Future work: multi-admin support via threshold signatures
 
 ## Bandwidth on LoRa
 

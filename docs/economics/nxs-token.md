@@ -13,29 +13,32 @@ NXS is the unit of account for the NEXUS network. It is not a speculative asset 
 NXS Properties:
   Smallest unit: 1 μNXS (micro-NXS)
   Initial distribution: Proof-of-service mining only (no ICO, no pre-mine)
-  Total supply cap: 2^64 μNXS (~18.4 × 10^18 μNXS)
+  Supply ceiling: 2^64 μNXS (~18.4 × 10^18 μNXS, asymptotic — never reached)
 ```
 
 ### Supply Model
 
-NXS has a **hard supply cap** with **decaying emission**:
+NXS has an **asymptotic supply ceiling** with **decaying emission**:
 
 | Phase | Period | Emission Rate |
 |-------|--------|--------------|
-| Bootstrap | Years 0–2 | Fixed reward per epoch, ~1% of cap per year |
+| Bootstrap | Years 0–2 | Fixed reward per epoch, ~1% of ceiling per year |
 | Maturity | Years 2+ | Reward halves every 2 years (geometric decay) |
 | Tail | Indefinite | Floor of 0.1% annual inflation relative to circulating supply |
 
-The tail emission ensures ongoing proof-of-service rewards exist indefinitely, funding relay and storage operators. The cap is a hard ceiling — tail emission asymptotically approaches but never reaches it. In practice, lost keys (estimated 1–2% of supply annually) offset tail emission, keeping effective circulating supply roughly stable after year ~10.
+The theoretical ceiling is 2^64 μNXS, but it is never reached — tail emission asymptotically approaches it. The tail ensures ongoing proof-of-service rewards exist indefinitely, funding relay and storage operators. In practice, lost keys (estimated 1–2% of supply annually) offset tail emission, keeping effective circulating supply roughly stable after year ~10.
 
 ### Typical Costs
 
 | Operation | Cost |
 |-----------|------|
-| Stochastic relay reward (per win) | ~500 μNXS (1/100 prob × 5 μNXS/pkt) |
-| Expected cost: 1 KB message, 5 hops | ~10 μNXS |
+| Expected relay cost per packet | ~5 μNXS |
+| Relay lottery payout (on win) | ~500 μNXS (5 μNXS ÷ 1/100 win probability) |
+| Expected cost: 1 KB message, 5 hops | ~75 μNXS (~3 packets × 5 μNXS × 5 hops) |
 | 1 hour of storage (1 MB) | ~50 μNXS |
-| 1 minute of compute (contract execution) | ~30-100 μNXS |
+| 1 minute of compute (contract execution) | ~30–100 μNXS |
+
+The relay lottery pays out infrequently but in larger amounts. Expected value per packet is the same: `500 μNXS × 1/100 = 5 μNXS`. See [Stochastic Relay Rewards](payment-channels) for the full mechanism.
 
 ## Economic Architecture
 
@@ -43,7 +46,7 @@ NEXUS has a simple economic model: **free between friends, paid between stranger
 
 ### Free Tier (Trust-Based)
 
-- Traffic between [trusted peers](community-zones) is **always free**
+- Traffic between [trusted peers](trust-neighborhoods) is **always free**
 - No tokens, no channels, no settlements needed
 - A local mesh where everyone trusts each other has **zero economic overhead**
 
@@ -75,14 +78,17 @@ Both mechanisms coexist. As the economy matures, channel-funded relay payments n
 
 ```
 Relay compensation per epoch:
-  Mining reward: base_reward_schedule(epoch_number) / active_relays_in_epoch
-    → distributed proportionally to verified VRF lottery wins
+  Epoch mint pool: base_reward_schedule(epoch_number)
     → new supply created (not transferred from a pool)
+
+  Relay R's mint share: epoch_mint_pool × (R_wins / total_wins_in_epoch)
+    → proportional to verified VRF lottery wins
+    → a relay with 10% of the epoch's wins gets 10% of the mint pool
 
   Channel revenue: sum of lottery wins debited from sender channels
     → direct payment, no new supply created
 
-  Total relay income = mining reward + channel revenue
+  Total relay income = mint share + channel revenue
 ```
 
 ### Bootstrap Sequence
@@ -97,14 +103,44 @@ Relay compensation per epoch:
 
 ### Trust-Based Credit
 
-Trusted peers can [vouch for each other](community-zones#trust-based-credit) by extending transitive credit. A friend-of-a-friend gets a credit line (capped at 10% of direct credit), backed by the vouching peer's NXS balance. This provides an on-ramp for new users without any explicit "zone" to join.
+Trusted peers can [vouch for each other](trust-neighborhoods#trust-based-credit) by extending transitive credit. Each node configures the credit line it extends to its direct trusted peers (e.g., "I'll cover up to 1000 μNXS for Alice"). A friend-of-a-friend gets 10% of that direct limit — backed by the vouching peer's NXS balance. If a credited node defaults, the voucher absorbs the debt. This provides an on-ramp for new users without needing to earn NXS first.
 
 **Free direct communication works immediately** with no tokens at all. NXS is only needed when your packets traverse untrusted infrastructure.
 
+## Why One Global Currency
+
+NXS is a single global unit of account, not a per-community token. This is a deliberate design choice.
+
+### The Alternative: Per-Community Currencies
+
+If each isolated community minted its own token, connecting two communities would require a currency exchange — someone to set an exchange rate, provide liquidity, and settle trades. On a mesh network of 50–500 nodes, there is not enough trading volume to sustain a functioning exchange market. The complexity (order books, matching, dispute resolution) vastly exceeds what constrained devices can support.
+
+### How One Currency Works Across Partitions
+
+When two communities operate in isolation:
+
+1. **Internally**: Both communities communicate free between trusted peers — no NXS needed
+2. **Independently**: Each community mints NXS via proof-of-service, proportional to actual relay work. The [CRDT ledger](crdt-ledger) tracks balances independently on each side
+3. **On reconnection**: The CRDT ledger merges automatically (CRDTs guarantee convergence). Both communities' NXS is valid because it was earned through real work, not printed arbitrarily
+
+NXS derives its value from **labor** (relaying, storage, compute), not from community membership. One hour of relaying in Community A is roughly equivalent to one hour in Community B. Different hardware costs are reflected in **market pricing** — nodes set their own per-byte charges — not in separate currencies.
+
+### Price Discovery Without Fiat
+
+NXS has no fiat exchange rate by design. Its "purchasing power" floats based on supply and demand for services:
+
+```
+Abundant relay capacity + low demand → relay prices drop (in μNXS)
+Scarce relay capacity + high demand  → relay prices rise (in μNXS)
+```
+
+Users don't need to know what 1 μNXS is worth in dollars. They only need to know: "Can I afford this service?" — and the answer is usually yes, because they earn NXS by providing services to others. The economy is circular, not pegged to an external reference.
+
 ## Economic Design Goals
 
-- **No speculation**: NXS is for purchasing services, not for trading
+- **No speculation**: NXS is for purchasing services, not for trading. There is no fiat exchange rate by design.
 - **No pre-mine**: All NXS enters circulation through proof-of-service
+- **Hoarding-resistant**: NXS has no external exchange value, so accumulating it has no purpose beyond purchasing network services. Tail emission (0.1% annual) mildly dilutes idle holdings. Lost keys (~1–2% annually) permanently remove supply. The economic incentive is to spend NXS on services, not to sit on it.
 - **Partition-safe**: The economic layer works correctly during network partitions and converges when they heal
 - **Minimal overhead**: [Stochastic rewards](payment-channels) reduce economic bandwidth overhead by ~10x compared to per-packet payment
 - **Communities first**: Trusted peer communication is free. The economic layer only activates at trust boundaries.

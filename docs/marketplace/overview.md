@@ -35,7 +35,7 @@ NodeCapabilities {
         medium: TransportType,
         bandwidth_bps: u64,
         latency_ms: u32,
-        reliability: f32,
+        reliability: u8,            // 0-255 (avoids FP on constrained devices)
         cost_per_byte: u64,
         internet_gateway: bool,
     }],

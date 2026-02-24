@@ -76,3 +76,86 @@ When a node needs a capability it doesn't have locally:
 4. **Query Ring 3**: Send a capability query beyond the neighborhood
 
 Most requests resolve at Ring 0 or Ring 1. The further out a query goes, the higher the latency and cost — which naturally incentivizes local provision of common capabilities.
+
+## Mobile Handoff
+
+When a mobile node (phone, laptop, vehicle) moves between areas, its Ring 0 neighbors change. Old relay agreements and payment channels become unreachable. The handoff protocol re-establishes connectivity in the new location.
+
+### Presence Beacons
+
+NEXUS nodes periodically broadcast a lightweight presence beacon on all their interfaces:
+
+```
+PresenceBeacon {
+    node_id: [u8; 16],       // destination hash
+    capabilities: u16,        // bitfield: relay, gateway, storage, compute, etc.
+    cost_tier: u8,            // 0=free/trusted, 1=cheap, 2=moderate, 3=expensive
+    load: u8,                 // current utilization (0-255)
+}
+// 20 bytes — broadcast every 10 seconds
+```
+
+Beacons are transport-agnostic — they go out over whatever interfaces the node has (LoRa, WiFi, BLE, etc.). A mobile node passively receives beacons to discover local NEXUS nodes before initiating any connection. This is the decentralized equivalent of a cellular tower scan.
+
+### Handoff Sequence
+
+When a mobile node detects new beacons (new area) or loses contact with its current relay:
+
+```
+Handoff:
+  1. Select best relay from received beacons (lowest cost × load)
+  2. Connect and establish link-layer encryption
+  3. Open payment channel (both sign initial state)
+  4. Resume communication through new relay
+```
+
+On high-bandwidth links (WiFi, BLE), this completes in under 500ms. On LoRa, a few seconds.
+
+### Credit-Based Fast Start
+
+For latency-sensitive handoffs (e.g., active voice call), a credit mechanism allows immediate relay before the payment channel is fully established:
+
+```
+CreditGrant {
+    grantor: NodeID,              // relay
+    grantee: NodeID,              // mobile node
+    credit_limit_bytes: u32,      // relay allowance before channel required
+    valid_for_ms: u16,            // credit window (default: 30 seconds)
+    condition: enum {
+        VisibleBalance(min_nxs),  // grantee has balance on CRDT ledger
+        TrustGraph,               // grantee is in grantor's trust graph
+        Unconditional,            // free initial credit (attract users)
+    },
+}
+```
+
+The relay checks the mobile node's balance on the CRDT ledger (already available via gossip) and extends temporary credit. Packets flow immediately while the channel opens in the background.
+
+If the mobile node has no visible balance and no trust relationship, it must complete the channel open first.
+
+### Roaming Cache
+
+Mobile nodes cache relay information for areas they've visited:
+
+```
+RoamingEntry {
+    area_fingerprint: [u8; 16],  // Blake3 hash of sorted beacon node_ids
+    relays: [{
+        node_id: NodeID,
+        capabilities: u16,
+        last_cost_tier: u8,
+        last_seen: Timestamp,
+        channel: Option<ChannelState>,  // preserved from last visit
+    }],
+    ttl: Duration,                // expire after 30 days of non-visit
+}
+```
+
+When a mobile node enters a previously visited area, it recognizes the beacon fingerprint and reconnects to a cached relay. If a preserved `ChannelState` exists and the relay is still alive, the old channel resumes with zero handoff latency — no new negotiation needed.
+
+### Graceful Departure
+
+No explicit teardown:
+- Old agreements expire naturally via `valid_until`
+- Old payment channels remain valid and settle lazily (next contact, or via gossip)
+- The mobile node's trust graph travels with it — if trusted peers exist in the new area, relay is free immediately

@@ -5,29 +5,49 @@ title: "Layer 0: Physical Transport"
 
 # Layer 0: Physical Transport
 
-NEXUS builds on the [Reticulum Network Stack](https://reticulum.network/) for its transport and link layers. Reticulum provides transport-agnostic networking over any medium that supports at least a half-duplex channel with ≥5 bps throughput and ≥500 byte MTU. NEXUS extends Reticulum with cost annotations and economic primitives.
+NEXUS requires a transport layer that provides transport-agnostic networking over any medium supporting at least a half-duplex channel with ≥5 bps throughput and ≥500 byte MTU. The transport layer is a swappable implementation detail — NEXUS defines the interface it needs, not the implementation.
 
-## Reticulum as Foundation
+## Transport Requirements
 
-Reticulum already solves the hard problems of transport abstraction:
+The transport layer must provide:
 
 - **Any medium is a valid link**: LoRa, WiFi, Ethernet, serial, packet radio, fiber, free-space optical
 - **Multiple simultaneous interfaces**: A node can bridge between transports automatically
 - **Announce-based routing**: No manual configuration of addresses, subnets, or routing tables
 - **Mandatory encryption**: All traffic is encrypted; unencrypted packets are dropped as invalid
 - **Sender anonymity**: No source address in packets
-- **Proven at 5 bps**: Tested on extremely constrained radio links
+- **Constrained-link operation**: Functional at ≥5 bps
 
-NEXUS uses Reticulum's transport interface, destination model, and link establishment. It extends the protocol with cost annotations on announces and an economic layer above.
+## Current Implementation: Reticulum
+
+The current transport implementation uses the [Reticulum Network Stack](https://reticulum.network/), which satisfies all requirements above and is proven on links as slow as 5 bps. NEXUS extends it with [CompactPathCost](network-protocol#nexus-extension-compact-path-cost) annotations on announces and an economic layer above.
+
+Reticulum is an implementation choice, not an architectural dependency. NEXUS extensions are carried as opaque payload data within Reticulum's announce DATA field — a clean separation that allows the transport to be replaced with a clean-room implementation in the future without affecting any layer above.
+
+### Participation Levels
+
+Not all nodes need to understand NEXUS extensions. Three participation levels coexist on the same mesh:
+
+| Level | Node Type | Understands | Earns NXS | Marketplace |
+|-------|-----------|-------------|-----------|-------------|
+| **L0** | Transport-only | Wire protocol only | No | No |
+| **L1** | NEXUS Relay | L0 + CompactPathCost + stochastic rewards | Yes (relay only) | No |
+| **L2** | Full NEXUS | Everything | Yes | Yes |
+
+**L0 nodes** relay packets and forward announces (including NEXUS extensions as opaque bytes) but do not parse economic extensions, earn rewards, or participate in the marketplace. They are zero-cost hops from NEXUS's perspective. This ensures the mesh works even when some nodes run the transport layer alone.
+
+**L1 nodes** are the minimum viable NEXUS implementation — they parse CompactPathCost, run the VRF relay lottery, and maintain payment channels. This is the target for ESP32 firmware.
+
+**L2 nodes** implement the full protocol stack including capability marketplace, storage, compute, and application services.
 
 ### Implementation Strategy
 
 | Platform | Implementation |
 |---|---|
-| Raspberry Pi, desktop, phone | Reticulum Python reference implementation (or compatible) |
-| ESP32, embedded | Rust implementation of Reticulum wire protocol (`no_std`) |
+| Raspberry Pi, desktop, phone | Rust implementation (primary) |
+| ESP32, embedded | Rust `no_std` implementation (L1 minimum) |
 
-Both implementations speak the same wire protocol and interoperate on the same network. The Rust implementation targets devices that cannot run Python.
+All implementations speak the same wire protocol and interoperate on the same network.
 
 ## Supported Transports
 
@@ -71,16 +91,23 @@ The 20,000x range between the slowest and fastest supported transports (500 bps 
 - **Data objects carry minimum bandwidth requirements.** A 500 KB image declares `min_bandwidth: 10000` (10 kbps). LoRa nodes never attempt to transfer it — they only propagate its hash and metadata.
 - **Applications adapt to link quality.** The protocol provides link metrics; applications decide what to send based on available bandwidth.
 
-## What NEXUS Adds to Reticulum
+## NAT Traversal
 
-Reticulum provides transport, routing, and encryption. NEXUS extends it with:
+Residential nodes behind NATs (common for WiFi and Ethernet interfaces) are handled at the transport layer. The Reticulum transport uses its link establishment protocol to traverse NATs — an outbound connection from behind the NAT establishes a bidirectional link without requiring port forwarding or STUN/TURN servers.
+
+For nodes that cannot establish outbound connections (rare), the announce mechanism still propagates their presence. Traffic destined for a NATed node is routed through a neighbor that does have a direct link — functionally equivalent to standard relay forwarding. No special NAT-awareness is needed at the NEXUS protocol layers above transport.
+
+## What NEXUS Adds Above Transport
+
+The transport layer provides packet delivery, routing, and encryption. NEXUS adds everything above:
 
 | Extension | Purpose |
 |---|---|
-| **Cost annotations on announces** | Enables economic routing — cheapest, fastest, or balanced path selection |
-| **Stochastic relay rewards** | Incentivizes relay operators without per-packet payment overhead |
-| **Capability advertisements** | Makes compute, storage, and connectivity discoverable and purchasable |
-| **CRDT economic ledger** | Tracks balances without consensus or blockchain |
-| **Trust graph** | Enables free communication between trusted peers |
+| **[CompactPathCost](network-protocol#nexus-extension-compact-path-cost) on announces** | Enables economic routing — cheapest, fastest, or balanced path selection |
+| **[Stochastic relay rewards](../economics/payment-channels)** | Incentivizes relay operators without per-packet payment overhead |
+| **[Capability advertisements](../marketplace/overview)** | Makes compute, storage, and connectivity discoverable and purchasable |
+| **[CRDT economic ledger](../economics/crdt-ledger)** | Tracks balances without consensus or blockchain |
+| **[Trust graph](../economics/trust-neighborhoods)** | Enables free communication between trusted peers |
+| **[Congestion control](network-protocol#congestion-control)** | CSMA/CA, per-neighbor fair sharing, priority queuing, backpressure |
 
-These extensions ride on top of Reticulum's existing gossip and announce mechanisms, staying within the protocol's bandwidth budget.
+These extensions ride on top of the transport's existing gossip and announce mechanisms, staying within the protocol's [bandwidth budget](network-protocol#bandwidth-budget).

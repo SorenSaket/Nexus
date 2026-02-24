@@ -65,6 +65,27 @@ Double-spend prevention is **probabilistic, not perfect**. Perfect prevention re
 4. **Fraud detection**: Overdrafts are flagged network-wide; the offending node is blacklisted
 5. **Economic disincentive**: For micropayments, blacklisting makes cheating unprofitable — the cost of losing your identity and accumulated reputation exceeds any single double-spend gain
 
+## Partition Minting and Supply Convergence
+
+When the network is partitioned, each partition independently runs the emission schedule and mints NXS proportional to local relay work. On merge, the GCounter merge (pointwise max per account) preserves individual balance correctness — no one loses earned NXS. However, **total minted supply across all partitions exceeds what a single-partition emission schedule would have produced.**
+
+```
+Example:
+  Epoch 5 emission schedule: 1000 NXS total
+  Partition A (60% of nodes): mints 1000 NXS to its relays
+  Partition B (40% of nodes): mints 1000 NXS to its relays
+  On merge: total minted in epoch 5 = 2000 NXS (not 1000)
+```
+
+This is an accepted tradeoff of partition tolerance — the alternative (coordinated minting) requires global consensus, which is incompatible with the design. The overminting is bounded:
+
+1. **Proportional to partition count**: Two partitions produce at most 2x; three produce at most 3x. Prolonged fragmentation into many partitions is rare in practice.
+2. **Detectable on merge**: When partitions heal, nodes can observe that multiple epoch proposals exist for the same epoch number. Post-merge epochs resume normal single-emission-schedule minting.
+3. **Self-correcting over time**: The emission schedule decays geometrically. A one-time overmint during a partition is a fixed quantity that becomes negligible relative to total supply. The asymptotic ceiling is unchanged — it is just approached slightly faster.
+4. **Offset by lost keys**: The estimated 1-2% annual key loss rate dwarfs partition minting overshoot in most scenarios.
+
+The protocol does not attempt to "claw back" overminted supply. The cost of the mechanism (requiring consensus) exceeds the cost of the problem (minor temporary supply inflation during rare partitions).
+
 ## Epoch Compaction
 
 The settlement GSet grows without bound. The Epoch Checkpoint Protocol solves this by periodically snapshotting the ledger state.
@@ -91,13 +112,27 @@ Epoch {
 }
 ```
 
+### Epoch Triggers
+
+An epoch is triggered when **any** of these conditions is met:
+
+| Trigger | Threshold | Purpose |
+|---------|-----------|---------|
+| **Settlement count** | ≥ 10,000 batches | Standard trigger for large meshes |
+| **GSet memory** | ≥ 500 KB | Protects constrained devices (ESP32 has ~520 KB usable RAM) |
+| **Small partition** | ≥ max(200, active_set_size × 10) settlements AND ≥ 1,000 gossip rounds since last epoch | Prevents stagnation in small partitions |
+
+The small-partition trigger ensures a 20-node village doesn't wait months for an epoch. At 200 settlements (the minimum), the GSet is ~6.4 KB — well within ESP32 capacity. The 1,000 gossip round floor (roughly 17 hours at 60-second intervals) prevents epochs from firing too rapidly in tiny partitions with bursty activity.
+
 ### Epoch Proposer Selection
 
-Not any node can propose an epoch. Eligibility requires:
+Eligibility requirements adapt to partition size:
 
-1. The node has processed **≥ 10,000 settlement batches** since the last epoch
-2. The node has direct links to **≥ 10 active nodes**
+1. The node has processed ≥ min(10,000, current epoch trigger threshold) settlement batches since the last epoch
+2. The node has direct links to ≥ min(3, active_set_size / 2) active nodes
 3. No other epoch proposal for this `epoch_number` has been seen
+
+In a 20-node partition, a node needs only 3 direct links (not 10) and 200 processed settlements (not 10,000) to propose.
 
 **Conflict resolution**: If multiple proposals for the same `epoch_number` arrive, nodes ACK the one with the **highest settlement count** (most complete state). Ties broken by lowest proposer `destination_hash`.
 
@@ -130,6 +165,47 @@ The false positive rate is set to **0.01% (1 in 10,000)** rather than 1%, becaus
 
 **Critical retention rule**: Both parties to a settlement **must retain the full `SettlementRecord`** until the epoch's verification window closes (4 epochs after activation). If both parties discard the record after epoch activation (believing it was included) and a bloom filter false positive caused it to be missed, the settlement would be permanently lost. During the verification window, each party independently checks that its settlements are reflected in the snapshot; if any are missing, it submits a settlement proof. Only after the window closes may the full record be discarded.
 
-### LoRa Nodes
+### Snapshot Scaling
 
-LoRa nodes don't participate in epoch consensus. They receive a compact epoch summary (~11 KB) from their nearest high-bandwidth peer containing: epoch number, their own balance, and a relevant bloom filter segment.
+At 1M+ nodes, the flat `account_snapshot` is ~32 MB — too large for constrained devices. The solution is a **Merkle-tree snapshot** with sparse views.
+
+**Full snapshot** (backbone/gateway nodes only): The account snapshot is stored as a sorted Merkle tree keyed by NodeID. Only nodes that participate in epoch consensus need the full tree. At 1M nodes and 32 bytes per entry, this is ~32 MB — feasible for nodes with SSDs.
+
+**Sparse snapshot** (everyone else): Constrained devices store only:
+- Their own balance
+- Balances of direct channel partners
+- Balances of trust graph neighbors (Ring 0-2)
+- The Merkle root of the full snapshot
+
+For a typical node with ~50 relevant accounts: 50 × 32 bytes = 1.6 KB.
+
+**On-demand balance verification**: When a constrained node needs a balance it doesn't have locally (e.g., to extend credit to a new node), it requests a Merkle proof from any capable peer:
+
+```
+BalanceProof {
+    node_id: NodeID,
+    total_earned: u64,
+    total_spent: u64,
+    merkle_siblings: Vec<Blake3Hash>,  // path from leaf to root
+    epoch_number: u64,
+}
+// Size: ~640 bytes for 1M nodes (20 tree levels × 32-byte hashes)
+```
+
+The constrained node verifies the proof against the Merkle root it already has. This proves the balance is in the snapshot without storing the full 32 MB.
+
+### Constrained Node Epoch Summary
+
+LoRa nodes and other constrained devices don't participate in epoch consensus. They receive a compact summary from their nearest capable peer:
+
+```
+EpochSummary {
+    epoch_number: u64,
+    merkle_root: Blake3Hash,               // root of full account snapshot
+    my_balance: (u64, u64),                // (total_earned, total_spent)
+    partner_balances: Vec<(NodeID, u64, u64)>, // channel partners + trust neighbors
+    bloom_segment: BloomFilter,            // relevant portion of settlement bloom
+}
+```
+
+Typical size: under 5 KB for a node with 20-30 channel partners.

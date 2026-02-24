@@ -47,10 +47,11 @@ NameBinding {
 }
 ```
 
-Name bindings propagate via gossip within the trust neighborhood. Conflicts (two nodes claiming the same name in the same community label) are resolved by:
-1. **First-seen wins** within each node's view
-2. **Trust-weighted** — a name binding from a more-trusted node is preferred
-3. **Local petnames** as ultimate fallback (see below)
+Name bindings propagate via gossip within the trust neighborhood. Conflicts (two nodes claiming the same name in the same community label) are resolved by precedence:
+
+1. **Trust-weighted** (highest priority) — if one claimant is in your trust graph and the other is not, the trusted claimant wins regardless of timing. Between two trusted claimants, the one with the shorter trust distance wins.
+2. **First-seen** (tiebreaker) — if both claimants have equal trust status (both trusted at the same distance, or both untrusted), the first binding your node received wins.
+3. **Local petnames** (ultimate fallback) — if you need guaranteed resolution regardless of conflicts, assign a local petname (see below). Petnames override all network name resolution.
 
 ## Cross-Community Resolution
 

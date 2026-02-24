@@ -7,13 +7,13 @@ title: Design Decisions
 
 This page documents the key architectural decisions made during NEXUS protocol design, including alternatives considered and the rationale for each choice.
 
-## Network Stack: Reticulum as Foundation
+## Network Stack: Reticulum as Initial Transport
 
 | | |
 |---|---|
-| **Chosen** | Build on the [Reticulum Network Stack](https://reticulum.network/) for transport, identity, encryption, and announce-based routing |
-| **Alternatives** | Clean-room implementation, libp2p, custom protocol |
-| **Rationale** | Reticulum already solves transport abstraction, cryptographic identity, mandatory encryption, sender anonymity (no source address), and announce-based routing — all proven on LoRa at 5 bps. NEXUS extends it with cost annotations and economic primitives rather than reinventing a tested foundation. The Rust `no_std` reimplementation for ESP32 speaks the same wire protocol. |
+| **Chosen** | Use [Reticulum Network Stack](https://reticulum.network/) as the initial transport implementation; treat it as a [swappable layer](#transport-layer-swappable-implementation) |
+| **Alternatives** | Clean-room implementation from day one, libp2p, custom protocol |
+| **Rationale** | Reticulum already solves transport abstraction, cryptographic identity, mandatory encryption, sender anonymity (no source address), and announce-based routing — all proven on LoRa at 5 bps. NEXUS extends it with CompactPathCost annotations and economic primitives rather than reinventing a tested foundation. The transport layer is an implementation detail: NEXUS defines the interface it needs and can switch to a clean-room implementation in the future without affecting any layer above. |
 
 ## Routing: Kleinberg Small-World with Cost Weighting
 
@@ -87,6 +87,30 @@ This page documents the key architectural decisions made during NEXUS protocol d
 | **Alternatives** | Global names via consensus |
 | **Rationale** | Global consensus contradicts partition tolerance. Community labels are self-assigned and informational — no authority, no uniqueness enforcement. Multiple disjoint clusters can share a label; resolution is proximity-based. Local petnames provide a fallback. |
 
+## Cost Annotations: Compact Path Cost (No Per-Relay Signatures)
+
+| | |
+|---|---|
+| **Chosen** | 6-byte constant-size `CompactPathCost` (running totals updated by each relay, no per-relay signatures) |
+| **Alternatives** | Per-relay signed CostAnnotation (~84 bytes per hop), aggregate signatures, signature-free with Merkle proof |
+| **Rationale** | Per-relay signatures make announces grow linearly with path length — 84 bytes × N hops. On a 1 kbps LoRa link with 3% routing budget, this limits convergence to ~1 announce per 22+ seconds. CompactPathCost uses 6 bytes total regardless of path length: log-encoded cumulative cost, worst-case latency, bottleneck bandwidth, and hop count. Per-relay signatures are unnecessary because routing decisions are local (you trust your link-authenticated neighbor), trust is transitive at each hop, and the market enforces honesty (overpriced relays get routed around, underpriced relays lose money). The announce itself remains signed by the destination node. |
+
+## Congestion Control: Three-Layer Design
+
+| | |
+|---|---|
+| **Chosen** | Link-level CSMA/CA + per-neighbor token bucket + 4-level priority queuing + economic cost response |
+| **Alternatives** | Pure CSMA/CA only, rigid TDMA, end-to-end TCP-style congestion control |
+| **Rationale** | A single mechanism is insufficient across the bandwidth range (500 bps to 10 Gbps). CSMA/CA handles collision avoidance on half-duplex radio. Token buckets enforce fair sharing across neighbors. Priority queuing ensures real-time traffic (voice) isn't starved by bulk transfers. Economic cost response (quadratic cost increase under congestion) signals scarcity through the existing cost routing mechanism, causing natural traffic rerouting without new protocol extensions. End-to-end congestion control (TCP-style) is wrong for a mesh — the bottleneck is typically a single constrained link, and hop-by-hop control responds faster. Rigid TDMA wastes bandwidth when some slots are unused. |
+
+## Transport Layer: Swappable Implementation
+
+| | |
+|---|---|
+| **Chosen** | Define transport as an interface with requirements; use Reticulum as the current implementation |
+| **Alternatives** | Hard dependency on Reticulum, clean-room from day one |
+| **Rationale** | Reticulum provides a proven transport layer tested at 5 bps on LoRa, saving significant implementation effort. But coupling NEXUS to Reticulum's codebase or community roadmap creates fragility. Instead, NEXUS defines the transport interface it needs (transport-agnostic links, announce-based routing, mandatory encryption, sender anonymity) and uses Reticulum as the current implementation. NEXUS extensions are carried as opaque payload in the announce DATA field — a clean separation. Three participation levels (L0 transport-only, L1 NEXUS relay, L2 full NEXUS) ensure interoperability with the underlying transport. This allows a future clean-room implementation without affecting any layer above transport. |
+
 ## Storage: Pay-Per-Duration with Erasure Coding
 
 | | |
@@ -94,6 +118,38 @@ This page documents the key architectural decisions made during NEXUS protocol d
 | **Chosen** | Bilateral storage agreements, pay-per-duration, Reed-Solomon erasure coding, lightweight challenge-response proofs |
 | **Alternatives** | Filecoin-style PoRep/PoSt with on-chain proofs; Arweave-style one-time-payment permanent storage; simple full replication |
 | **Rationale** | Filecoin's Proof of Replication requires GPU-level computation (minutes to seal a sector) — impossible on ESP32 or Raspberry Pi. Arweave's permanent storage requires a blockchain endowment model and assumes perpetually declining storage costs. Both require global consensus. NEXUS uses simple Blake3 challenge-response proofs (verifiable in under 10ms on ESP32) and bilateral agreements settled via payment channels. Erasure coding (Reed-Solomon) provides the same durability as 3x replication at 1.5x storage overhead. The tradeoff: we can't prove a node stores data *uniquely* (no PoRep), but we can prove it stores data *at all* — and the data owner doesn't care how the node organizes its disk. |
+
+## Mobile Handoff: Presence Beacons + Credit-Based Fast Start
+
+| | |
+|---|---|
+| **Chosen** | Transport-agnostic presence beacons, credit-based fast start, roaming cache with channel preservation |
+| **Alternatives** | Pre-negotiated handoff (cellular-style), pure re-discovery from scratch, always-connected overlay |
+| **Rationale** | Cellular handoff requires a central controller — incompatible with decentralized mesh. Pure re-discovery works but is slow for latency-sensitive sessions. Presence beacons (20 bytes, broadcast every 10 seconds on any interface) let mobile nodes passively discover local relays before connecting. Credit-based fast start allows immediate relay if the mobile node has visible CRDT balance, while the payment channel opens in the background. The roaming cache preserves channels for previously visited areas, enabling zero-latency reconnection on return. No explicit teardown needed — old agreements expire via `valid_until`. |
+
+## Light Client Trust: Content Verification + Multi-Source Queries
+
+| | |
+|---|---|
+| **Chosen** | Three-tier verification: content-hash check (Tier 1), owner-signature check (Tier 2), multi-source queries (Tier 3) |
+| **Alternatives** | Merkle proofs over DHT state, SPV-style state root verification, full DHT replication on clients |
+| **Rationale** | Merkle proofs require a global state root, which contradicts partition tolerance (no consensus). SPV-style verification has the same problem. Full DHT replication is too bandwidth-heavy for phones. Instead, content addressing (Tier 1) gives zero-overhead verification for the most common case — `Blake3(data) == key` proves authenticity regardless of relay honesty. Signed objects (Tier 2) prevent forgery of mutable data. Multi-source queries (Tier 3, N=2-3 independent nodes) detect censorship and staleness. Trusted relays skip to single-source for all tiers. Overhead is minimal: at most one extra 192-byte query for critical lookups via untrusted relays. |
+
+## Epoch Triggers: Adaptive Multi-Criteria
+
+| | |
+|---|---|
+| **Chosen** | Three-trigger system: settlement count ≥ 10,000 (large mesh), GSet size ≥ 500 KB (memory pressure), or partition-proportional threshold with gossip-round floor (small partitions) |
+| **Alternatives** | Fixed 10,000-settlement-only trigger, wall-clock timer, per-node independent compaction |
+| **Rationale** | A 20-node village on LoRa with low traffic might take months to reach 10,000 settlements. ESP32 nodes (520 KB usable RAM) would exhaust memory first. The adaptive trigger fires at max(200, active_set × 10) settlements with a 1,000-gossip-round floor (~17 hours), keeping GSet under ~6.4 KB for small partitions. The 500 KB GSet size trigger is a safety net regardless of partition size. Proposer eligibility adapts too — only 3 direct links needed (not 10) in small partitions. Wall-clock timers were rejected because they require clock synchronization. Per-node compaction was rejected because it fragments global state. |
+
+## Ledger Scaling: Merkle-Tree Snapshots with Sparse Views
+
+| | |
+|---|---|
+| **Chosen** | Merkle-tree account snapshot; full tree on backbone nodes, sparse view + Merkle root on constrained devices, on-demand balance proofs (~640 bytes) |
+| **Alternatives** | Flat snapshot everywhere, sharded epochs, neighborhood-only ledgers |
+| **Rationale** | At 1M nodes the flat snapshot is ~32 MB — unworkable on ESP32 or phones. Sharded epochs fragment the ledger and complicate cross-shard verification. Neighborhood-only ledgers lose global balance consistency. A Merkle tree over the sorted account snapshot gives the best of both: backbone nodes store the full tree (32 MB, feasible on SSD), constrained devices store only their own balance + channel partners + trust neighbors (~1.6 KB for 50 accounts) plus the Merkle root. Any balance can be verified on demand with a ~640-byte proof (20 tree levels × 32 bytes). No global state transfer needed. |
 
 ## Transforms/Inference: Compute Capability, Not Protocol Primitive
 

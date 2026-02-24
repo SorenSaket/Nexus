@@ -85,8 +85,8 @@ ChannelState {
 1. **Open**: Both parties agree on initial balances. Both sign the opening state.
 2. **Update**: On each lottery win, the balance shifts by the reward amount. Channel updates are infrequent — only triggered by wins.
 3. **Settle**: Either party can request settlement. Both sign a `SettlementRecord` that is gossiped to the network and applied to the [CRDT ledger](crdt-ledger).
-4. **Dispute**: If one party submits an old state, the counterparty can submit a higher-sequence state within a **48-hour challenge window** (~7 settlement batches). The higher sequence always wins.
-5. **Abandonment**: If a channel has no updates for **4 epochs** (~30 days), either party can unilaterally close with the last mutually-signed state. This prevents permanent fund lockup.
+4. **Dispute**: If one party submits an old state, the counterparty can submit a higher-sequence state within a **2,880 gossip round challenge window** (~48 hours at 60-second rounds). The higher sequence always wins.
+5. **Abandonment**: If a channel has no updates for **4 epochs**, either party can unilaterally close with the last mutually-signed state. This prevents permanent fund lockup.
 
 ## Multi-Hop Payment
 
@@ -118,4 +118,4 @@ The stochastic model fits within [Tier 2 (economic)](../protocol/network-protoco
 
 ## Trusted Peers: Free Relay
 
-Nodes relay traffic for [trusted peers](community-zones) for free — no lottery, no channel updates. The stochastic reward system only activates for traffic between non-trusted nodes. This mirrors the real world: you help your neighbors for free, but charge strangers for using your infrastructure.
+Nodes relay traffic for [trusted peers](trust-neighborhoods) for free — no lottery, no channel updates. The stochastic reward system only activates for traffic between non-trusted nodes. This mirrors the real world: you help your neighbors for free, but charge strangers for using your infrastructure.

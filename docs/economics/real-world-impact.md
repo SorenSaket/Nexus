@@ -80,17 +80,17 @@ Every node earns proportionally to the value it provides:
 The simplest way to earn. Any node that forwards packets for non-trusted traffic participates in the [stochastic relay lottery](payment-channels). More traffic through your node = more lottery wins = more NXS.
 
 ```
-Relay earnings estimate:
-  Minimal relay (ESP32 + LoRa): 1-10 NXS/month
-    → Low traffic, but zero operating cost (solar powered)
+Relay earnings estimate (at ~5 μNXS expected reward per packet):
+  Minimal relay (ESP32 + LoRa): ~5,000–50,000 μNXS/month
+    → ~30-300 packets/day, zero operating cost (solar powered)
 
-  Community bridge (Pi Zero + WiFi): 10-50 NXS/month
+  Community bridge (Pi Zero + WiFi): ~50,000–500,000 μNXS/month
     → Bridges LoRa to WiFi, moderate traffic
 
-  Gateway (Pi 4 + cellular): 50-500 NXS/month
+  Gateway (Pi 4 + cellular): ~500,000–5,000,000 μNXS/month
     → Internet uplink, high-value traffic
 
-  Backbone (mini PC + directional WiFi): 500+ NXS/month
+  Backbone (mini PC + directional WiFi): 5,000,000+ μNXS/month
     → High-throughput transit between mesh segments
 ```
 

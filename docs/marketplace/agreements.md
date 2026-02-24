@@ -7,6 +7,37 @@ title: Capability Agreements
 
 When a requester finds a suitable provider through [discovery](discovery), they form a bilateral agreement. Agreements are between two parties only — no network-wide registration required.
 
+## Cost Structure
+
+Agreements use a discriminated cost model that adapts to different capability types:
+
+```
+CostStructure: enum {
+    PerByte {
+        cost_per_byte: u64,         // μNXS per byte transferred
+    },
+    PerInvocation {
+        cost_per_call: u64,         // μNXS per function invocation
+        max_input_bytes: u32,       // cost covers up to this input size
+    },
+    PerDuration {
+        cost_per_epoch: u64,        // μNXS per epoch of service
+    },
+    PerCycle {
+        cost_per_million_cycles: u64, // μNXS per million compute cycles
+        max_cycles: u64,             // hard limit
+    },
+}
+```
+
+| Capability | Typical CostStructure |
+|-----------|----------------------|
+| Relay / Bandwidth | `PerByte` |
+| Storage | `PerDuration` |
+| Compute (contract) | `PerCycle` |
+| Compute (function) | `PerInvocation` |
+| Internet gateway | `PerByte` or `PerDuration` |
+
 ## Agreement Structure
 
 ```
@@ -71,4 +102,4 @@ Negotiation is simple and local:
 4. If acceptable, both parties sign the agreement
 5. Service begins; payment flows through the channel
 
-There is no auction, no bidding process, and no global price discovery. Prices are set by providers based on their own cost structure. Within [trust neighborhoods](../economics/community-zones), trusted peers often offer discounted or free services.
+There is no auction, no bidding process, and no global price discovery. Prices are set by providers based on their own cost structure. Within [trust neighborhoods](../economics/trust-neighborhoods), trusted peers often offer discounted or free services.

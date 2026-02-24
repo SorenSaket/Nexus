@@ -71,7 +71,7 @@ Node identity is **self-certifying**. A node proves it owns a destination hash b
 
 - **Payment channels**: Both parties sign every state update. Forgery requires the other party's private key.
 - **Capability agreements**: Both provider and consumer sign. Neither can forge the other's commitment.
-- **Announcements**: Path announcements are signed by the announcing node. Relay nodes append signed cost annotations. Malicious relays can lie about costs, but the economic model disincentivizes this — overpriced nodes are routed around, underpriced nodes lose money.
+- **Announcements**: Path announcements are signed by the announcing node. Relay nodes update the [CompactPathCost](network-protocol#nexus-extension-compact-path-cost) running totals (not individually signed — link-layer authentication at each hop is sufficient). Malicious relays can lie about costs, but the economic model disincentivizes this — overpriced nodes are routed around, underpriced nodes lose money.
 
 ## Privacy
 
@@ -102,9 +102,57 @@ An attacker can generate unlimited identities (Sybil attack). NEXUS mitigates th
 
 1. **Payment channel deposits**: Opening a channel requires visible balance. Sybil nodes with no balance cannot participate in the economy.
 2. **Reputation accumulation**: Reputation is earned through verified service delivery over time. New identities start with zero reputation. Creating many identities dilutes rather than concentrates reputation.
-3. **Trust graph**: A Sybil attacker needs real social relationships to gain trust. Trusted peers [vouch economically](../economics/community-zones#trust-based-credit) — they absorb the debts of nodes they trust, making trust costly to extend.
+3. **Trust graph**: A Sybil attacker needs real social relationships to gain trust. Trusted peers [vouch economically](../economics/trust-neighborhoods#trust-based-credit) — they absorb the debts of nodes they trust, making trust costly to extend.
 4. **Proof of service**: Stochastic relay rewards use a [VRF-based lottery](../economics/payment-channels#how-stochastic-rewards-work) that produces exactly one verifiable outcome per (relay, packet) pair. A node can only earn by actually delivering packets, and cannot grind for favorable lottery outcomes.
 5. **Transitive credit limits**: Even if a Sybil node gains one trust relationship, transitive credit is capped at 10% per hop and rate-limited for new relationships.
+
+## Reputation
+
+Reputation is a **locally computed, per-neighbor score** — not a global value. There is no network-wide reputation database. Each node maintains its own view of how reliable its peers are.
+
+### Reputation State
+
+```
+PeerReputation {
+    node_id: NodeID,
+    relay_score: u16,       // 0-10000 (fixed-point, 2 decimal places)
+    storage_score: u16,     // 0-10000
+    compute_score: u16,     // 0-10000
+    total_interactions: u32, // number of completed agreements
+    failed_interactions: u32,// number of failed/disputed agreements
+    first_seen_epoch: u64,  // how long we've known this peer
+    last_updated: Timestamp,
+}
+```
+
+### How Reputation Is Earned
+
+Each completed capability agreement adjusts the relevant score:
+
+```
+On agreement completion:
+  if successful:
+    score += (10000 - score) / 100   // diminishing returns — harder to gain at higher scores
+  if failed:
+    score -= score / 10              // 10% penalty per failure — fast to lose
+
+New nodes start at score = 0. A node with zero interactions
+has zero reputation — not negative, just unknown.
+```
+
+### How Reputation Is Used
+
+- **Credit line sizing**: Nodes extend larger credit lines to higher-reputation peers
+- **Capability selection**: When multiple providers offer the same capability, the consumer considers reputation alongside cost and latency
+- **Storage agreement duration**: Nodes with higher storage scores get offered longer storage contracts
+- **Epoch consensus**: Epoch proposals from higher-reputation nodes are preferred when competing proposals conflict
+
+### Properties
+
+- **Local only**: Each node computes its own reputation scores. No gossip of reputation values — this prevents reputation manipulation by flooding the network with fake endorsements
+- **First-hand only**: Scores are based on direct interactions, not hearsay. A node trusts its own experience, not claims from third parties
+- **Trust-weighted referrals**: When a node has no direct experience with a peer, it can query trusted neighbors for their scores. The response is informational — the querying node applies its own weighting based on how much it trusts the referrer
+- **No global score**: There is no way to ask "what is node X's reputation?" There is only "what is my experience with node X?" This makes reputation Sybil-resistant — an attacker can't inflate a score without actually providing good service to the scoring node
 
 ## Key Management
 

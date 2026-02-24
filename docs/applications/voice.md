@@ -26,7 +26,7 @@ On higher-bandwidth links, Opus provides near-CD-quality voice with full-duplex 
 
 ## Encryption
 
-Voice streams are encrypted with a per-session symmetric key, negotiated via the standard [X25519 key exchange](../protocol/security#link-layer-encryption-hop-by-hop).
+Voice streams are **end-to-end encrypted** using the standard [E2E encryption](../protocol/security#end-to-end-encryption-data-payloads) mechanism — each session generates an ephemeral X25519 keypair, and the symmetric session key is derived from a Diffie-Hellman exchange with the remote party's public key. Relay nodes carry encrypted voice packets they cannot decrypt.
 
 ## Bandwidth Bridging
 
