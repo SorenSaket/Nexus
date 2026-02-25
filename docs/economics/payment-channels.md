@@ -13,6 +13,34 @@ Per-packet payment requires a channel state update for every batch of relayed pa
 
 ## How Stochastic Rewards Work
 
+```
+            Stochastic Relay Reward Flow
+
+  Packet arrives           VRF Lottery
+  at relay node     ┌──────────────────────┐
+       │            │                      │
+       ▼            │  VRF(relay_key,      │
+  ┌─────────┐       │       packet_hash)   │
+  │ Forward │──────▶│         │            │
+  │ packet  │       │         ▼            │
+  └─────────┘       │  output < target?    │
+                    │    │          │       │
+                    │   YES        NO      │
+                    │ (1/100)    (99/100)  │
+                    └────┤──────────┤──────┘
+                         │          │
+                         ▼          ▼
+                    ┌─────────┐  Nothing
+                    │ Win!    │  (no overhead)
+                    │ 500 μMHR│
+                    └────┬────┘
+                         │
+              ┌──────────┴──────────┐
+              ▼                     ▼
+        Channel debit          Mining proof
+        (sender pays)       (epoch minting)
+```
+
 Each relayed packet is checked against a **VRF-based lottery**. The relay computes a Verifiable Random Function output over the packet, producing a deterministic but unpredictable result that anyone can verify:
 
 ```

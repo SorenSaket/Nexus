@@ -59,7 +59,7 @@ Blog post feed:
   feed = DataObject {
       content_type: Mutable,
       owner: your_node_id,
-      payload: Inline([post_hash_1, post_hash_2, ...]),
+      payload: Inline([post_id_1, post_id_2, ...]),
       // Owner can update the post list by publishing a new version
       // Each individual post is immutable — only the feed index changes
   }
@@ -72,8 +72,8 @@ A social feed is an append-only log of posts, served via [MHR-Pub](../services/m
 ```
 Your feed:
   1. Profile: Mutable DataObject (name, bio, avatar hash)
-  2. Posts: Immutable DataObjects (each post is permanent)
-  3. Feed index: Mutable DataObject listing post hashes in order
+  2. Posts: Mutable DataObjects (editable, versioned via sequence number)
+  3. Feed index: Mutable DataObject listing post IDs in order
   4. Subscriber notifications via MHR-Pub
 ```
 
@@ -81,9 +81,9 @@ Your feed:
 
 ```
 Publishing flow:
-  1. Create an immutable DataObject for the post content
+  1. Create a mutable DataObject for the post content (keyed by post_id)
   2. Store it in MHR-Store with replication
-  3. Update your feed index (mutable) to include the new post hash
+  3. Update your feed index (mutable) to include the new post_id
   4. MHR-Pub notifies all subscribers of the update
 ```
 

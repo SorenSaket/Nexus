@@ -14,6 +14,32 @@ Blockchains require global consensus: all nodes must agree on the order of trans
 ## Account State
 
 ```
+                    CRDT Ledger Overview
+
+   Node A                          Node B
+  ┌──────────────┐               ┌──────────────┐
+  │ earned: 500  │               │ earned: 300  │
+  │ spent:  200  │               │ spent:  100  │
+  │ ────────────-│               │ ──────────── │
+  │ balance: 300 │               │ balance: 200 │
+  └──────┬───────┘               └──────┬───────┘
+         │                              │
+         │    SettlementRecord          │
+         │    (both signatures)         │
+         └──────────┬───────────────────┘
+                    │
+                    ▼  gossiped to network
+         ┌──────────────────────┐
+         │  Each receiving node │
+         │  validates & merges  │
+         │                      │
+         │  GCounter merge:     │
+         │  pointwise max       │
+         │  (no conflicts ever) │
+         └──────────────────────┘
+```
+
+```
 AccountState {
     node_id: NodeID,
     total_earned: GCounter,     // grow-only, per-node entries, merge = pointwise max
@@ -128,7 +154,7 @@ Epoch {
     epoch_number: u64,
     timestamp: u64,
 
-    // Frozen account balances at this epoch
+    // Frozen account balances at this epoch (rebased — see below)
     account_snapshot: Map<NodeID, (total_earned, total_spent)>,
 
     // Bloom filter of ALL settlement hashes included
@@ -196,6 +222,38 @@ Epoch proposals are rate-limited to one per node per epoch period. Proposals tha
 3. **Activate**: At 67% acknowledgment (of the active set defined in the proposal), the epoch becomes active. Nodes can discard individual settlement records and use only the bloom filter for dedup. If a significant fraction of nodes reject the active set (NAK), the proposer must re-propose with an updated set after further gossip convergence.
 4. **Verification window**: During the grace period (4 epochs after activation), any node can submit a **settlement proof** — the full `SettlementRecord` — for any settlement it believes was missed. If the settlement is valid (signatures check) and NOT in the epoch's bloom filter, it is applied on top of the snapshot.
 5. **Finalize**: After the grace period, previous epoch data is fully discarded. The bloom filter is the final word.
+
+### GCounter Rebase
+
+GCounters are grow-only — `total_earned` and `total_spent` increase monotonically. Over very long timescales (centuries), high-throughput nodes could approach the u64 maximum (1.84 × 10^19) due to money velocity: the same tokens are earned, spent, earned again, each cycle growing both counters.
+
+Epoch compaction solves this. At each epoch, the snapshot **rebases** counters to net balance:
+
+```
+GCounter rebase at epoch compaction:
+
+  Before epoch (raw GCounter values):
+    Alice: total_earned = 5,000,000    total_spent = 4,800,000
+    Balance = 200,000
+
+  After epoch snapshot (rebased):
+    Alice: total_earned = 200,000      total_spent = 0
+    Balance = 200,000 (unchanged)
+
+  Post-epoch settlements apply on top of rebased values:
+    Alice earns 50,000 → total_earned = 250,000
+    Alice spends 30,000 → total_spent = 30,000
+    Balance = 220,000 ✓
+```
+
+Rebasing is safe because:
+
+1. **Epoch is a synchronization point** — all pre-epoch settlements are already merged
+2. **GCounter merge still works** — pointwise max on rebased values is correct for any post-epoch settlement order
+3. **No information lost** — the balance is preserved exactly; only the "counter history" above net balance is discarded
+4. **Bloom filter deduplication** — pre-epoch settlements cannot be replayed (they're in the bloom filter regardless of rebase)
+
+Without rebase, a node processing 10^10 μMHR/epoch of throughput would overflow u64 after ~1.84 × 10^9 epochs (~35,000 years). With rebase, counters never exceed current circulating supply — the protocol runs indefinitely.
 
 ### Late Arrivals After Compaction
 

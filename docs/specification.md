@@ -55,6 +55,14 @@ This page is the normative reference for the Mehr protocol. Individual documenta
 | IdentityClaim min size | ~100 bytes | [Identity & Claims](applications/identity#wire-format) |
 | Vouch size | 113 bytes | [Identity & Claims](applications/identity#vouch-wire-format) |
 | Geo verification: min vouches | 3 (for Verified level) | [Voting](applications/voting#geoverificationlevel) |
+| Protocol version encoding | 1 byte (major 4 bits, minor 4 bits) | [Versioning](development/versioning#version-field) |
+| Extended version escape | Major = 15 → read u16 pair from TLV | [Versioning](development/versioning#version-field) |
+| Current protocol version | `0x10` (v1.0) | [Versioning](development/versioning#version-field) |
+| Emission halving shift clamp | max 63 (prevents UB at epoch 6.4M+) | [MHR Token](economics/mhr-token#supply-model) |
+| Max curated feed entries | 256 per page | [Social](applications/social#5-curated-feed) |
+| LicenseOffer min size | ~160 bytes | [Digital Licensing](applications/licensing#wire-format) |
+| LicenseGrant size | 226 bytes | [Digital Licensing](applications/licensing#wire-format) |
+| Max custom license terms | 1024 characters | [Digital Licensing](applications/licensing#licenseoffer) |
 
 ## Cryptographic Primitives
 
@@ -72,7 +80,7 @@ This page is the normative reference for the Mehr protocol. Individual documenta
 
 ```
 Layer 6: Applications
-  ├── Messaging, Social, Identity, Voice, Naming, Voting, Forums, Hosting
+  ├── Messaging, Social, Identity, Voice, Naming, Voting, Licensing, Cloud Storage, Roaming, Forums, Hosting
   └── depends on ↓
 
 Layer 5: Service Primitives
@@ -96,7 +104,7 @@ Layer 1: Network Protocol
   └── depends on ↓
 
 Layer 0: Physical Transport
-  └── LoRa, WiFi, Cellular, Ethernet, BLE, Fiber, Serial
+  └── LoRa, WiFi, Cellular, LTE-M, NB-IoT, Ethernet, BLE, Fiber, Serial
 ```
 
 Each layer depends **only** on the layer directly below it. Applications never touch transport details. Payment never touches routing internals.
@@ -155,14 +163,15 @@ Total: 200 bytes
 | 1. Layer 0: Physical Transport | [Physical Transport](protocol/physical-transport) |
 | 2. Layer 1: Network Protocol | [Network Protocol](protocol/network-protocol) |
 | 3. Layer 2: Security | [Security](protocol/security) |
-| 4. Layer 3: Economic Protocol | [MHR Token](economics/mhr-token), [Stochastic Relay Rewards](economics/payment-channels), [CRDT Ledger](economics/crdt-ledger), [Trust & Neighborhoods](economics/trust-neighborhoods), [Real-World Economics](economics/real-world-impact) |
+| 4. Layer 3: Economic Protocol | [MHR Token](economics/mhr-token), [Stochastic Relay Rewards](economics/payment-channels), [CRDT Ledger](economics/crdt-ledger), [Trust & Neighborhoods](economics/trust-neighborhoods), [Content Propagation](economics/propagation), [Content Governance](economics/content-governance), [Real-World Economics](economics/real-world-impact) |
 | 5. Layer 4: Capability Marketplace | [Overview](marketplace/overview), [Discovery](marketplace/discovery), [Agreements](marketplace/agreements), [Verification](marketplace/verification) |
 | 6. Layer 5: Service Primitives | [MHR-Store](services/mhr-store), [MHR-DHT](services/mhr-dht), [MHR-Pub](services/mhr-pub), [MHR-Compute](services/mhr-compute) |
-| 7. Layer 6: Applications | [Messaging](applications/messaging), [Social](applications/social), [Voice](applications/voice), [Naming](applications/naming), [Community Apps](applications/community-apps), [Hosting](applications/hosting) |
+| 7. Layer 6: Applications | [Messaging](applications/messaging), [Social](applications/social), [Identity](applications/identity), [Voice](applications/voice), [Naming](applications/naming), [Community Apps](applications/community-apps), [Voting](applications/voting), [Digital Licensing](applications/licensing), [Cloud Storage](applications/cloud-storage), [Roaming](applications/roaming), [Hosting](applications/hosting) |
 | 8. Hardware Reference | [Reference Designs](hardware/reference-designs), [Device Tiers](hardware/device-tiers) |
 | 9. Implementation Roadmap | [Roadmap](development/roadmap) |
 | 10. Design Decisions | [Design Decisions](development/design-decisions) |
-| 11. Open Questions | [Open Questions](development/open-questions) |
+| 11. Protocol Versioning | [Versioning](development/versioning) |
+| 12. Open Questions | [Open Questions](development/open-questions) |
 
 ## Version History
 

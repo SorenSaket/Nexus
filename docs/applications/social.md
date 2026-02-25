@@ -24,23 +24,54 @@ While "social" implies short text posts, the same architecture handles **any con
 
 Every publication on Mehr has two layers: a **free envelope** that propagates everywhere (browsable at zero cost), and **paid content** that requires retrieval fees. Users browse envelopes to decide what's worth accessing, then pay only for content they actually want.
 
+```
+                        Two-Layer Architecture
+
+   ┌─────────────────────────────────────────────────────────────┐
+   │  FREE LAYER (PostEnvelope)                                  │
+   │                                                             │
+   │  Propagates via MHR-Pub to all scope subscribers            │
+   │  ~300-500 bytes — fits in a single LoRa frame               │
+   │                                                             │
+   │  ┌──────────┬────────────┬───────────┬──────────────────┐   │
+   │  │ Headline │  Summary   │ Blurhash  │ Scopes, metadata │   │
+   │  └──────────┴────────────┴───────────┴──────────────────┘   │
+   │                         │                                   │
+   │                     post_id ──────────────────┐            │
+   │                                                │            │
+   ├────────────────────────────────────────────────│────────────┤
+   │  PAID LAYER (SocialPost)                       │            │
+   │                                                ▼            │
+   │  Fetched on demand — reader pays relay fees   [DataObject]  │
+   │  Size proportional to content                               │
+   │                                                             │
+   │  ┌──────────┬────────────────────┬──────────────────────┐   │
+   │  │ Full text│  Media (images,    │  Links               │   │
+   │  │          │  video, audio)     │                      │   │
+   │  └──────────┴────────────────────┴──────────────────────┘   │
+   │                         │                                   │
+   │                    Kickback ──▶ Author                      │
+   └─────────────────────────────────────────────────────────────┘
+```
+
 ### PostEnvelope (Free Layer)
 
 The envelope is a lightweight, separate [DataObject](../services/mhr-store) that propagates freely across the mesh. It contains everything a reader needs to decide whether to fetch the full post:
 
 ```
 PostEnvelope {
-    post_hash: Option<Blake3Hash>,          // hash of the full SocialPost (None for boost-only envelopes)
+    post_id: Option<Blake3Hash>,            // stable ID of the SocialPost (None for boost-only envelopes)
     author: NodeID,
     headline: Option<String>,               // title (~100 chars, author-set)
     summary: Option<String>,                // author-written preview (None for boosts — use the original's)
     media_hints: Vec<MediaHint>,            // lightweight descriptions of attachments
     scopes: Vec<HierarchicalScope>,         // geographic + interest tags
-    reply_to: Option<Blake3Hash>,           // parent post hash (threading)
-    boost_of: Option<Blake3Hash>,           // boosted/reposted content hash
-    references: Vec<Blake3Hash>,            // related posts (bidirectional content graph)
+    reply_to: Option<Blake3Hash>,           // post_id of parent (threading)
+    boost_of: Option<Blake3Hash>,           // post_id of boosted post
+    references: Vec<Blake3Hash>,            // post_ids of related posts (bidirectional content graph)
     content_size: u32,                      // full post size in bytes (0 for boost-only)
     created: Timestamp,
+    sequence: u64,                          // monotonic version counter (incremented on edit)
     kickback_rate: u8,                      // author's desired share of retrieval fees (0-255)
     signature: Ed25519Sig,                  // signed by author (proves authenticity)
 }
@@ -57,21 +88,24 @@ Envelope size: ~300–500 bytes. Fits in a single LoRa frame with `min_bandwidth
 
 ### SocialPost (Paid Layer)
 
-The full post is an immutable [DataObject](../services/mhr-store) containing the actual content. Fetching it costs retrieval fees:
+The full post is a mutable [DataObject](../services/mhr-store) containing the actual content. Fetching it costs retrieval fees:
 
 ```
 SocialPost {
+    post_id: Blake3Hash,                    // stable ID: Blake3(author ‖ created ‖ nonce)
     author: NodeID,
     content: PostContent {
         text: Option<String>,               // full post body (UTF-8)
         media: Vec<Blake3Hash>,             // references to media DataObjects
         links: Vec<String>,                 // external URLs (for internet-connected nodes)
     },
+    sequence: u64,                          // monotonic version counter (0 on first publish)
+    edited: Option<Timestamp>,              // None on first publish, Some on edits
     signature: Ed25519Sig,
 }
 ```
 
-The SocialPost itself is lean — scopes, timestamps, and metadata live on the envelope. The post contains only the content that costs money to retrieve. There is no back-reference from post to envelope; the envelope's `post_hash` is the only link between them. Going from post to envelope (if ever needed) is a DHT lookup for envelopes containing a given `post_hash`.
+The SocialPost is lean — scopes, timestamps, and metadata live on the envelope. The post contains only the content that costs money to retrieve. Both the envelope and the post are mutable DataObjects addressed by `(author, post_id)`. The `post_id` is a stable identifier generated at creation time (`Blake3(author ‖ created ‖ nonce)`) that never changes, even when the content is edited.
 
 ### Profile
 
@@ -93,6 +127,33 @@ UserProfile {
 ## Feed Types
 
 Mehr social supports five feed types. All feeds are assembled **locally** — no server decides what you see.
+
+```
+                    Five Feed Types
+
+  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
+  │ 1. FOLLOW    │  │ 2. GEOGRAPHIC│  │ 3. INTEREST  │
+  │              │  │              │  │              │
+  │ Specific     │  │ Content from │  │ Content by   │
+  │ users you    │  │ a place:     │  │ topic:       │
+  │ choose       │  │ neighborhood │  │ pokemon,     │
+  │              │  │ → city       │  │ physics,     │
+  │ Node(alice)  │  │ → region     │  │ jazz         │
+  └──────────────┘  └──────┬───────┘  └──────┬───────┘
+                           │                  │
+                    ┌──────┴──────────────────┴──────┐
+                    │ 4. INTERSECTION                │
+                    │ Client-side filter on BOTH:    │
+                    │ "Portland Pokemon" = geo ∩ topic│
+                    └───────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────┐
+  │ 5. CURATED                                      │
+  │ Human editor selects best content               │
+  │ Readers subscribe to curator's feed             │
+  │ Two kickback flows: curator + original author   │
+  └─────────────────────────────────────────────────┘
+```
 
 ### 1. Direct Follow Feed
 
@@ -172,7 +233,7 @@ CuratedFeed {
 }
 
 CuratedEntry {
-    post_hash: Blake3Hash,                  // reference to original post
+    post_id: Blake3Hash,                    // stable ID of original post
     added: Timestamp,
     note: Option<String>,                   // curator's commentary
 }
@@ -217,23 +278,76 @@ Every level has skin in the game:
 
 ### Publishing Flow
 
-When an author creates a post, two DataObjects are published:
+When an author creates a post, two mutable DataObjects are published:
 
 ```
 1. Author writes post content + sets headline/summary
-2. Client generates SocialPost (paid layer) first:
-     → hashed to produce post_hash
-     → stored as DataObject with normal storage agreement
+2. Client generates a stable post_id: Blake3(author ‖ created ‖ random_nonce)
+3. Client creates SocialPost (paid layer):
+     → stored as mutable DataObject keyed by (author, post_id)
+     → sequence: 0 (first version)
      → only fetched when a reader requests the full content
-3. Client generates PostEnvelope (free layer) using post_hash:
-     → stored as DataObject with min_bandwidth: 0
+4. Client creates PostEnvelope (free layer) with same post_id:
+     → stored as mutable DataObject with min_bandwidth: 0
+     → sequence: 0 (first version)
      → propagates via MHR-Pub to scope subscribers
      → no storage agreement needed within trust network
 ```
 
-The SocialPost is created and hashed first so the envelope can reference it via `post_hash`. The envelope costs almost nothing to store and propagate (under 500 bytes). The full post costs proportional to its size. Authors pay for content storage, not for letting people know the content exists.
+The `post_id` is a stable identifier that never changes — it's the address of both the envelope and the post across all edits. The envelope costs almost nothing to store and propagate (under 500 bytes). The full post costs proportional to its size. Authors pay for content storage, not for letting people know the content exists.
+
+### Editing Posts
+
+Authors can edit their posts by publishing new versions of both the SocialPost and PostEnvelope:
+
+```
+Editing flow:
+  1. Author modifies content (and optionally headline/summary)
+  2. Client publishes updated SocialPost:
+       → same post_id, same (author, post_id) key
+       → sequence: previous + 1
+       → edited: current timestamp
+  3. Client publishes updated PostEnvelope (if headline/summary changed):
+       → same post_id, same key
+       → sequence: previous + 1
+  4. MHR-Store propagates the update (highest sequence wins)
+  5. MHR-Pub notifies scope subscribers of the updated envelope
+```
+
+**Edit properties:**
+
+- **Version history is not preserved** by default. Mutable DataObject semantics: the highest sequence number replaces the previous version. Storage nodes only keep the latest version.
+- **Replies, boosts, and references are stable.** They reference the `post_id`, not the content. An edited post doesn't break its reply chains or reference graph.
+- **Clients can show edit status.** The `edited` timestamp on SocialPost tells readers the post was modified. Clients may display "edited" alongside the post.
+- **No edit limit.** Authors can edit as many times as they want. Each edit increments `sequence` and costs a storage update (negligible).
+- **Boosts of edited posts** reflect the latest version. A reader fetching a boosted post always gets the current content.
 
 ## Content Economics
+
+```
+                    Content Economics Flow
+
+  Author                                                    Reader
+    │                                                         │
+    │ 1. Pay storage                                          │
+    │──────────▶ [Storage Node]                               │
+    │                │                                        │
+    │           2. Envelope                                   │
+    │           propagates (free) ─────────────────────────▶  │
+    │                                                    3. Browse
+    │                                               headlines, summaries
+    │                                                    (free)
+    │                                                         │
+    │                                                    4. Fetch full
+    │                                                    post (paid)
+    │                │◀───── relay fees ──────────────────────│
+    │                │                                        │
+    │    5. Kickback │                                        │
+    │◀───────────────│                                        │
+    │                                                         │
+    │  Popular post?  Kickback > storage cost = self-funding  │
+    │  Unpopular?     Kickback < storage cost = author pays   │
+```
 
 ### Browse Before You Pay
 
@@ -372,7 +486,7 @@ Replies reference the parent post via `reply_to` on the envelope:
 ```
 Reply to a post:
     PostEnvelope {
-        reply_to: Some(parent_post_hash),
+        reply_to: Some(parent_post_id),
         summary: "Great point!",
         ...
     }
@@ -393,15 +507,15 @@ A boost (repost) references the original via `boost_of` on the envelope:
 ```
 Boost a post:
     PostEnvelope {
-        post_hash: None,                      // no SocialPost — boost is envelope-only
-        boost_of: Some(original_post_hash),
+        post_id: None,                        // no SocialPost — boost is envelope-only
+        boost_of: Some(original_post_id),
         summary: None,                        // original's envelope has the summary
         content_size: 0,
         ...
     }
 ```
 
-Boosts are envelope-only — `post_hash` is None and no SocialPost is created. When a reader fetches the boosted content, the original author receives kickback — not the booster. Boosts are pure amplification without capturing revenue.
+Boosts are envelope-only — `post_id` is None and no SocialPost is created. When a reader fetches the boosted content, the original author receives kickback — not the booster. Boosts are pure amplification without capturing revenue.
 
 ### References
 
@@ -410,7 +524,7 @@ References declare that a post is **related to** other posts — without threadi
 ```
 Reference other posts:
     PostEnvelope {
-        references: [post_hash_a, post_hash_b, post_hash_c],
+        references: [post_id_a, post_id_b, post_id_c],
         headline: "Why the bike lane debate misses the point",
         summary: "Alice, Bob, and Carol each analyzed the new bike lanes...",
         ...

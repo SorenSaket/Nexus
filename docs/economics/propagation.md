@@ -87,6 +87,25 @@ When a post earns more in [kickback](../services/mhr-store#revenue-sharing-kickb
 
 Interest communities are **sparse** — they span geography. A `Topic("gaming", "pokemon")` post from Portland might interest readers in Tokyo, Berlin, and Buenos Aires, with nothing in between.
 
+```
+                    Geographic vs. Interest Propagation
+
+    Geographic (dense, local-first)       Interest (sparse, validated-then-global)
+
+         ┌──Country──┐                    Portland ···· Tokyo ···· Berlin
+         │           │                       ▲            ▲          ▲
+      ┌Region┐   ┌Region┐                   │            │          │
+      │      │   │      │               interest     interest    interest
+    ┌City┐ ┌City┐     City              relay node   relay node  relay node
+    │    │                                   ▲
+  Nbhd  Nbhd  ← content starts here         │
+    ▲                                    local validation
+    │                                    (boost/retrieve/curate)
+  Author                                     ▲
+                                           Author
+    Bubbles UP with demand              Spreads OUT after validation
+```
+
 ### Interest Relay Nodes
 
 Interest communities naturally develop **interest relay nodes** — nodes that subscribe to a topic and bridge between geographic clusters:
@@ -169,7 +188,26 @@ The economics naturally prioritize the right audience: local Portland readers ge
 
 ## Content Lifecycle
 
-Every piece of content on Mehr follows an economic lifecycle:
+Every piece of content on Mehr follows an economic lifecycle. Content is born local and either grows through demand or expires through indifference:
+
+```
+                         Content Lifecycle
+
+  Popularity ▲
+             │              ┌─── PEAK ───┐
+             │             ╱  Self-funding  ╲
+             │            ╱   Wide caching   ╲
+             │        ╱──╱                     ╲──╲
+             │      ╱  GROWTH                DECLINE  ╲
+             │    ╱  Kickback rises        Demand drops  ╲
+             │  ╱    Caches multiply       Caches evict     ╲
+             │╱                                               ╲
+             │ BIRTH                                    EXPIRY ╲──
+             │ Author pays                              GC'd or
+             │ Neighborhood scope                       reduced scope
+             └──────────────────────────────────────────────────▶ Time
+                                                    (epochs)
+```
 
 ```
 Phase 1: BIRTH

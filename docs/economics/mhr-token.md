@@ -30,14 +30,20 @@ MHR has an **asymptotic supply ceiling** with **decaying emission**:
 
 ```
 Emission formula:
+  halving_shift = min(e / 100_000, 63)   // clamp to prevent undefined behavior
   epoch_reward(e) = max(
-    10^12 >> (e / 100_000),              // discrete halving (bit-shift)
+    10^12 >> halving_shift,              // discrete halving (bit-shift)
     circulating_supply * 0.001 / E_year  // tail floor
   )
 
   E_year = trailing 1,000-epoch moving average of epoch frequency
   Halving is epoch-counted, not wall-clock (partition-safe)
   At ~1 epoch per 10 minutes: 100,000 epochs ≈ 1.9 years
+
+  Implementation note: the shift operand MUST be clamped to 63 (max
+  for u64). At epoch 6,400,000 (~year 1218), unclamped shift = 64
+  which is undefined behavior on most platforms. Clamping to 63 yields
+  0 (10^12 >> 63 = 0), so the tail floor takes over — correct behavior.
 ```
 
 The theoretical ceiling is 2^64 μMHR, but it is never reached — tail emission asymptotically approaches it. The initial reward of 10^12 μMHR/epoch yields ~1.5% of the supply ceiling minted in the first halving period, providing strong bootstrap incentive. Discrete halving every 100,000 epochs is epoch-counted (no clock synchronization needed) and trivially computable via bit-shift on integer-only hardware.
@@ -56,9 +62,82 @@ The tail ensures ongoing proof-of-service rewards exist indefinitely, funding re
 
 The relay lottery pays out infrequently but in larger amounts. Expected value per packet is the same: `500 μMHR × 1/100 = 5 μMHR`. See [Stochastic Relay Rewards](payment-channels) for the full mechanism.
 
+## Why Relay-Only Minting
+
+Only relay earns minting rewards. Storage and compute earn through bilateral payments, not minting. This is deliberate.
+
+```
+Service minting analysis:
+
+  Relay:    ✓ Minting reward (VRF lottery)
+            Every win proves a real packet was forwarded.
+            The VRF is bound to actual packet hashes — unfakeable.
+
+  Storage:  ✗ No minting reward
+            Storage proofs can be gamed: store your own garbage data,
+            respond to your own challenges, claim minting. A bilateral
+            StorageAgreement requires TWO signatures — but a Sybil
+            node could sign both sides.
+
+  Compute:  ✗ No minting reward
+            Compute is demand-driven. "Mining" computation without
+            a requester would incentivize wasted work. Unlike relay
+            (which serves others), un-requested computation serves
+            nobody.
+```
+
+Storage and compute don't need minting because they bootstrap through the free tier and bilateral payments:
+
+```
+Bootstrap sequence by service type:
+
+  Phase 0: FREE TIER
+    ├── Relay:   Trusted peers relay for free (works immediately)
+    ├── Storage: Trusted peers store each other's data for free
+    └── Compute: Nodes run their own contracts locally
+
+  Phase 1: RELAY MINTING
+    ├── Non-trusted traffic triggers VRF lottery
+    ├── Relay nodes accumulate MHR through epoch minting
+    └── MHR enters circulation for the first time
+
+  Phase 2: SPENDING
+    ├── Relay earners spend MHR on paid storage agreements
+    ├── Relay earners spend MHR on compute delegation
+    └── Storage/compute providers now have MHR income
+
+  Phase 3: MATURE ECONOMY
+    ├── Bilateral payments dominate all services
+    ├── Minting becomes residual (decaying emission)
+    └── Service prices emerge from supply/demand
+```
+
+Relay is the right bootstrap mechanism because it's the most universal service — every node relays. A $30 solar relay earns minting rewards by forwarding packets, then spends those tokens on storage and compute from more capable nodes. The minting subsidy flows from the most common service to the rest of the economy.
+
+**Sharing storage is another low-barrier entry point.** Any device with spare disk space can offer [cloud storage](../applications/cloud-storage#earning-mhr-through-storage) and earn MHR through bilateral payments. While storage doesn't earn minting rewards, it earns directly from users who need their files stored and replicated. The marginal cost is near zero (idle disk space), so even modest demand generates income. For users who want to participate in the economy without running relay infrastructure, storage is the simplest starting point.
+
 ## Economic Architecture
 
 Mehr has a simple economic model: **free between friends, paid between strangers.**
+
+```
+                          MHR Token Flow
+    ┌─────────────────────────────────────────────────────┐
+    │                                                     │
+    │    TRUST NETWORK (free)    │  PAID ECONOMY (MHR)    │
+    │                            │                        │
+    │   [Alice] ◀──free──▶ [Bob] │──relay──▶ [Carol]      │
+    │      │                     │    │         │         │
+    │    free                    │  lottery    pays       │
+    │      │                     │  win?       relay      │
+    │   [Dave]                   │    │         fee       │
+    │                            │    ▼         │         │
+    │   No tokens.               │  Mint +     ▼         │
+    │   No channels.             │  Channel ──▶ Storage   │
+    │   No overhead.             │  debit      Compute   │
+    │                            │             Content    │
+    └─────────────────────────────────────────────────────┘
+```
 
 ### Free Tier (Trust-Based)
 
@@ -142,22 +221,178 @@ When two communities operate in isolation:
 
 MHR derives its value from **labor** (relaying, storage, compute), not from community membership. One hour of relaying in Community A is roughly equivalent to one hour in Community B. Different hardware costs are reflected in **market pricing** — nodes set their own per-byte charges — not in separate currencies.
 
-### Price Discovery Without Fiat
+### Fiat Exchange
 
-MHR has no fiat exchange rate by design. Its "purchasing power" floats based on supply and demand for services:
+MHR has no official fiat exchange rate. The protocol includes no exchange mechanism, no order book, no trading pair. But MHR buys real services — bandwidth, storage, compute, content access — so it has real value. People will trade it for fiat currency, whether through informal markets, OTC trades, or external exchanges.
+
+This is expected and not inherently harmful.
+
+**Why exchange doesn't break the system:**
+
+```
+Token flow with external exchange:
+
+  Operator earns MHR ──▶ Sells for fiat ──▶ Pays electricity bill
+       │                      │
+       │                      ▼
+       │                Buyer gets MHR ──▶ Spends on network services
+       │                      │
+       ▼                      ▼
+  Network received        Network received
+  real work (relay)       real demand (usage)
+```
+
+1. **Purchased MHR is legitimate.** If someone buys MHR with fiat instead of earning it through relay, the seller earned it through real work. The network benefited from that work. The buyer funds network infrastructure indirectly — identical to buying bus tokens.
+
+2. **MHR derives value from utility.** Its value comes from the services it buys, not from artificial scarcity. If the service economy is healthy, MHR has value regardless of exchange markets.
+
+3. **Hoarding is self-correcting.** Someone who buys MHR and holds it is funding operators (paying fiat for earned MHR) while removing tokens from circulation. Remaining MHR becomes more valuable per service unit, incentivizing earning through service provision. Tail emission (0.1% annual) mildly dilutes idle holdings.
+
+**What could go wrong:**
+
+| Risk | Mitigation |
+|------|-----------|
+| **Deflationary spiral** (hoarding prevents spending) | Tail emission; free tier ensures basic functionality regardless |
+| **Speculation** (price detaches from utility) | Utility value creates a floor; MHR has no use outside the network |
+| **Regulatory attention** | Protocol doesn't facilitate exchange; users must understand their jurisdiction |
+
+**Internal price discovery** still works as designed — service prices float based on supply and demand:
 
 ```
 Abundant relay capacity + low demand → relay prices drop (in μMHR)
 Scarce relay capacity + high demand  → relay prices rise (in μMHR)
 ```
 
-Users don't need to know what 1 μMHR is worth in dollars. They only need to know: "Can I afford this service?" — and the answer is usually yes, because they earn MHR by providing services to others. The economy is circular, not pegged to an external reference.
+Users don't need to know what 1 μMHR is worth in fiat. They need to know: "Can I afford this service?" — and the answer is usually yes, because they earn MHR by providing services. The economy is circular even if some participants enter through fiat exchange.
+
+### Gateway Operators (Fiat Onramp)
+
+Not everyone wants to run a relay. Pure consumers — people who just want to use the network — should be able to pay with fiat and never think about MHR. **Gateway operators** make this possible.
+
+A gateway operator is a trusted intermediary who bridges fiat payment and MHR economics. The consumer interacts with the gateway; the gateway interacts with the network. This uses existing protocol mechanics — no new wire formats or consensus changes.
+
+```
+Gateway Operator Model
+
+  Consumer                    Gateway                      Network
+  ────────                    ───────                      ───────
+  Signs up (fiat payment) ──▶ Adds consumer to trusted_peers
+                              Extends credit via CreditState
+
+  Uses network ─────────────▶ Gateway relays for free      ──▶ Paid relay
+  (messages, content,         (trusted peer = free)              to wider network
+   storage, etc.)                                                (gateway pays MHR)
+
+  Monthly fiat bill ────────▶ Gateway earns MHR through
+                              relay + receives fiat
+                              from consumers
+```
+
+**How it works:**
+
+1. **Sign-up**: Consumer pays the gateway in fiat (monthly subscription, prepaid, pay-as-you-go — the gateway chooses its business model)
+2. **Trust extension**: Gateway adds the consumer to `trusted_peers` and extends a credit line via [CreditState](trust-neighborhoods#trust-based-credit). The consumer's traffic through the gateway is free (trusted peer relay)
+3. **Network access**: The consumer uses the network normally. Their traffic reaches the gateway for free, and the gateway pays MHR for onward relay to untrusted nodes
+4. **Settlement**: The gateway earns MHR through relay minting + charges fiat to consumers. The spread between fiat revenue and MHR costs is the gateway's margin
+
+**The consumer never sees MHR.** From their perspective, they pay a monthly bill and use the network. Like a mobile carrier — you don't think about interconnect fees between networks.
+
+```
+Trust-based gateway mechanics:
+
+  Gateway's TrustConfig:
+    trusted_peers: { consumer_1, consumer_2, ... }
+    cost_overrides: { consumer_1: 0, consumer_2: 0 }  // free for consumers
+
+  Gateway's CreditState per consumer:
+    credit_limit: proportional to fiat subscription tier
+    rate_limit: prevents abuse (e.g., 10 MB/epoch for basic tier)
+
+  Consumer's view:
+    - No MHR wallet needed
+    - No payment channels
+    - No economic complexity
+    - Just "install app, sign up, use"
+```
+
+**Why this works without protocol changes:**
+
+| Mechanism | Already Exists |
+|-----------|---------------|
+| Free relay for trusted peers | [Trust Neighborhoods](trust-neighborhoods#free-local-communication) |
+| Credit extension | [CreditState](trust-neighborhoods#trust-based-credit) |
+| Rate limiting | Per-epoch credit limits in CreditState |
+| Abuse prevention | Gateway revokes trust on non-payment (fiat side) |
+
+**Gateway business models:**
+
+| Model | Description | Consumer Experience |
+|-------|-------------|-------------------|
+| **Subscription** | Monthly fiat fee for a usage tier | Like a phone plan |
+| **Prepaid** | Buy credit in advance, use until depleted | Like a prepaid SIM |
+| **Pay-as-you-go** | Fiat bill based on actual usage | Like a metered utility |
+| **Freemium** | Free tier (rate-limited) + paid upgrade | Like free WiFi with premium option |
+
+**Gateway incentives:**
+
+- Gateways earn relay minting rewards (they relay traffic between consumers and the wider network)
+- Gateways earn fiat from consumer subscriptions
+- Gateways with many consumers become valuable relay hubs — more traffic = more lottery wins = more MHR minting
+- Competition between gateways drives prices toward cost (standard market dynamics)
+
+**Risks and mitigations:**
+
+| Risk | Mitigation |
+|------|-----------|
+| **Gateway goes down** | Consumer can switch gateways or run their own node. No lock-in — identity is self-certifying |
+| **Gateway censors** | Consumer switches gateway. Multiple gateways compete in any area with demand |
+| **Gateway overcharges** | Market competition. Consumers compare pricing. Low switching cost |
+| **Consumer abuses gateway** | Gateway revokes trust, cuts off credit. Fiat non-payment handled off-protocol |
+
+Gateways are not privileged protocol participants. They are regular nodes that choose to offer a service (fiat-to-network bridging) using standard trust and credit mechanics. Anyone can become a gateway operator — the barrier is having enough MHR to extend credit and enough fiat customers to sustain the business.
 
 ## Economic Design Goals
 
-- **No speculation**: MHR is for purchasing services, not for trading. There is no fiat exchange rate by design.
-- **No pre-mine**: All MHR enters circulation through proof-of-service
-- **Hoarding-resistant**: MHR has no external exchange value, so accumulating it has no purpose beyond purchasing network services. Tail emission (0.1% annual) mildly dilutes idle holdings. Lost keys (~1–2% annually) permanently remove supply. The economic incentive is to spend MHR on services, not to sit on it.
+- **Utility-first**: MHR is designed for purchasing services. Fiat exchange may emerge but the protocol's health doesn't depend on it, and the internal economy functions as a closed loop for participants who never touch fiat.
+- **No pre-mine**: All MHR enters circulation through proof-of-service. No ICO, no founder allocation, no insider advantage.
+- **Spend-incentivized**: Tail emission (0.1% annual) mildly dilutes idle holdings. Lost keys (~1–2% annually) permanently remove supply. MHR earns nothing by sitting still — only by being spent on services or lent via trust-based credit.
 - **Partition-safe**: The economic layer works correctly during network partitions and converges when they heal
 - **Minimal overhead**: [Stochastic rewards](payment-channels) reduce economic bandwidth overhead by ~10x compared to per-packet payment
 - **Communities first**: Trusted peer communication is free. The economic layer only activates at trust boundaries.
+
+## Long-Term Sustainability
+
+Does MHR stay functional for 100 years?
+
+### Economic Equilibrium
+
+```
+Supply dynamics over time:
+
+  Year 0-10:   High minting emission, rapid supply growth
+               Lost keys: ~1-2% annually (negligible vs. emission)
+               Economy bootstraps
+
+  Year 10-30:  Minting decays significantly (many halvings)
+               Lost keys accumulate (~10-40% of early supply permanently gone)
+               Effective circulating supply stabilizes
+
+  Year 30+:    Tail emission ≈ lost keys
+               Roughly constant effective supply
+               All income is from bilateral payments + residual minting
+```
+
+The tail emission exists specifically for this: it ensures relay operators always have a minting incentive, even centuries from now. Lost keys and tail emission create a rough equilibrium — new supply enters through service, old supply exits through lost keys. Neither grows without bound.
+
+### Technology Evolution
+
+| Challenge | Mehr's Answer |
+|-----------|--------------|
+| **New radio technologies** | Transport-agnostic — any medium that moves bytes works |
+| **Post-quantum cryptography** | [KeyRotation](../applications/identity) claims enable key migration; new algorithms plug into existing identity framework |
+| **Hardware evolution** | Capability marketplace adapts — nodes advertise what they can do, not what they are |
+| **Protocol upgrades** | Open question — no formal governance mechanism yet. Communities can fork; the trust graph is the real network, not the protocol version |
+
+### What Doesn't Change
+
+The fundamental economic model — free between trusted peers, paid between strangers — is as old as human commerce. It doesn't depend on any specific technology, cryptographic primitive, or hardware platform. As long as people want to communicate and are willing to help their neighbors, the model works.

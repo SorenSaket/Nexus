@@ -5,21 +5,45 @@ title: Roadmap
 
 # Implementation Roadmap
 
-The Mehr implementation is organized into four phases, progressing from core networking fundamentals to a full ecosystem. Each phase has concrete milestones with acceptance criteria.
+The Mehr implementation follows a **product-first** strategy: get a usable app into people's hands as fast as possible, then layer on capabilities driven by real usage. The protocol spec is comprehensive because it needs to be — but implementation is ruthlessly phased. Each phase delivers something people can use, not just something that passes tests.
 
-## Phase 1: Foundation
+```
+                    Implementation Strategy
 
-**Focus**: Core networking and basic economics — the minimum to run a mesh with cost-aware routing and micropayments.
+  Phase 1          Phase 2           Phase 3           Phase 4
+  ─────────        ─────────         ─────────         ─────────
+  PHONE APP        RANGE +           ECONOMICS +       FULL
+  (MVP)            SOCIAL            TOKEN              ECOSYSTEM
 
-### Milestone 1.1: Transport + Identity
+  WiFi/BLE mesh    LoRa relay nodes  Payment channels   Advanced compute
+  Messaging        Social feeds      VRF lottery        Licensing
+  Trust graph      Content           CRDT ledger        Onion routing
+  Free tier only   MHR-Store/DHT     Gateway operators  Protocol bridges
 
-- Implement `NodeIdentity` (Ed25519 keypair generation, destination hash derivation, X25519 conversion)
+  Users: early     Users: growing    Users: economy     Users: mature
+  adopters         communities       bootstraps         ecosystem
+```
+
+**Principle**: The free tier (trusted peer communication) is a complete product on its own. MHR tokens, economics, and advanced features come only after there are real users generating real traffic. Token follows utility, never leads it.
+
+---
+
+## Phase 1: Mesh Messenger (MVP)
+
+**Focus**: A phone app that lets people message and call each other over a local mesh — no internet, no tokens, no hardware purchases. The free tier only.
+
+**Why phone first**: 4+ billion smartphones already deployed. WiFi Direct gives 50-200m range, BLE gives 10-100m. Zero additional hardware cost. App stores handle distribution. This is the fastest path to real users.
+
+### Milestone 1.1: Core Protocol Library (Rust)
+
+- `NodeIdentity` (Ed25519 keypair generation, destination hash derivation, X25519 conversion)
 - Link-layer encryption (X25519 ECDH + ChaCha20-Poly1305, counter-based nonces, key rotation)
 - Packet framing (Reticulum-compatible: header, addresses, context, data)
-- Interface abstraction (LoRa, WiFi, serial — at least 2 transports working)
+- Interface abstraction (WiFi Direct, BLE — phone-native transports first)
 - Announce generation and forwarding with Ed25519 signature verification
+- Target `no_std` compatibility from day one (same code on phones and ESP32 later)
 
-**Acceptance**: Two nodes on different transports (e.g., LoRa + WiFi) can establish an encrypted link, exchange announces, and forward packets to each other. Packet contents are encrypted and unauthenticated nodes are rejected.
+**Acceptance**: Two phones can establish an encrypted link over WiFi Direct, exchange announces, and forward packets. Unauthenticated nodes are rejected.
 
 ### Milestone 1.2: Routing + Gossip
 
@@ -30,19 +54,122 @@ The Mehr implementation is organized into four phases, progressing from core net
 - Bandwidth budget enforcement (4-tier allocation, constrained-link adaptation)
 - Announce propagation rules (event-driven + 30-min refresh, hop limit, expiry, link failure detection)
 
-**Acceptance**: A 5-node mesh (mixed LoRa + WiFi) converges routing tables within 3 gossip rounds. Packets are forwarded via cost-optimal paths. Removing a node causes re-routing within 3 minutes. Gossip overhead stays within 10% budget on all links.
+**Acceptance**: A 5-phone mesh converges routing tables within 3 gossip rounds. Packets are forwarded via cost-optimal paths. Removing a phone causes re-routing within 3 minutes. Gossip overhead stays within 10% budget.
 
-### Milestone 1.3: Congestion Control
+### Milestone 1.3: Trust Graph + Free Relay
 
-- CSMA/CA on half-duplex links (listen-before-talk with exponential backoff)
-- Per-neighbor token bucket (fair share, payment-weighted priority)
-- 4-level priority queuing (P0 real-time through P3 bulk, starvation prevention)
-- Backpressure signaling (4-byte CongestionSignal)
-- Dynamic cost response (quadratic formula, propagated via gossip)
+- `TrustConfig` implementation (trusted peers, cost overrides, scopes)
+- Free relay logic (sender trusted AND destination trusted → no lottery, no channels)
+- Adding/removing trusted peers (the only social action)
 
-**Acceptance**: Under synthetic load, P0 packets (voice) maintain latency below 500ms while P3 (bulk) is throttled. Congestion on one link causes traffic to reroute via cost increase. No link exceeds its bandwidth budget.
+**Acceptance**: Trusted peers relay traffic for free with zero economic overhead. The full messaging stack works with zero tokens in circulation.
 
-### Milestone 1.4: Payment Channels
+### Milestone 1.4: Messaging
+
+- E2E encrypted messaging (store-and-forward, offline delivery)
+- Group messaging with co-admin delegation
+- Congestion control (CSMA/CA, priority queuing, backpressure)
+
+**Acceptance**: Two phones exchange encrypted messages via multi-hop mesh. Messages to offline nodes are stored and delivered when the recipient reconnects. Group messaging works with 3+ participants.
+
+### Milestone 1.5: Phone App
+
+- Android app (Kotlin/Rust FFI) — Android first for broader device support and sideloading
+- iOS app (Swift/Rust FFI) — follows Android
+- Contact management (add trusted peers via QR code, NFC, or manual key entry)
+- Messaging UI (conversations, groups, media sending adapted to link quality)
+- Voice on WiFi links (Opus codec)
+- Background mesh relay (phone relays traffic while in pocket)
+- Multi-transport handoff (WiFi Direct ↔ BLE, seamless)
+
+**Acceptance**: A non-technical user can install the app, add a friend via QR code, and exchange messages — all without internet. Voice calls work on WiFi links. The app relays traffic for the mesh in the background.
+
+### Phase 1 Deliverable
+
+**A mesh messenger app for phones.** Install, add friends, message and call — no internet, no tokens, no special hardware. This is the product people use and tell others about.
+
+**Target audiences**: festivals/events, campuses, communities with unreliable internet, privacy-conscious groups, disaster preparedness, rural areas.
+
+---
+
+## Phase 2: Range + Social
+
+**Focus**: Extended range via cheap LoRa hardware, social features as a growth driver, and the service primitives that support them.
+
+### Milestone 2.1: LoRa Transport
+
+- LoRa interface implementation (SX1276/SX1262 via `no_std` Rust)
+- Off-the-shelf hardware support:
+  - Heltec WiFi LoRa 32 (~$15)
+  - LILYGO T-Beam (~$25, with GPS)
+  - RAK WisBlock (~$30, modular)
+  - RNode (Reticulum-native)
+- LTE-M and NB-IoT interface support (carrier-managed LPWAN)
+- Multi-interface bridging (phone WiFi ↔ LoRa relay ↔ WiFi gateway)
+- Solar relay firmware (ESP32 L1: transport, routing, gossip — runs on $30 solar kit)
+
+**Acceptance**: A LoRa relay extends the phone mesh to 5-15 km range. A phone sends a message that hops: phone → WiFi → LoRa relay → WiFi → destination phone. Solar relay runs unattended for 30+ days.
+
+### Milestone 2.2: MHR-Store
+
+- `DataObject` types (Immutable, Mutable, Ephemeral)
+- Storage agreements (bilateral, pay-per-duration)
+- Proof of storage (Blake3 Merkle challenge-response)
+- Erasure coding (Reed-Solomon, default schemes by size)
+- Repair protocol (detect failure → assess → reconstruct → re-store)
+- Garbage collection (7-tier priority)
+- Kickback fields (revenue sharing between storage node and content author)
+
+**Acceptance**: A node stores a DataObject with replication factor 3 across the mesh. Proof-of-storage challenges pass. Erasure coding reconstructs from k of n chunks. Kickback flows correctly on retrieval.
+
+### Milestone 2.3: MHR-DHT + MHR-Pub
+
+- DHT routing (XOR distance + cost weighting, α=0.7)
+- k=3 replication with cost-bounded storage set
+- Lookup and publication protocols
+- Subscription types (Key, Prefix, Node, Scope)
+- Delivery modes (Push, Digest, PullHint)
+- Scope-based subscriptions (geographic + interest feeds)
+- Bandwidth-adaptive mode selection
+
+**Acceptance**: A node publishes a DataObject and it's discoverable via DHT lookup from any node in the mesh. MHR-Pub delivers notifications to scope subscribers within 2 gossip rounds.
+
+### Milestone 2.4: Social Layer
+
+- `PostEnvelope` (free layer) + `SocialPost` (paid layer) — mutable DataObjects
+- `UserProfile` (display name, bio, avatar, scopes, claims)
+- Hierarchical scopes (Geo + Topic) with scope matching
+- Five feed types: follow, geographic, interest, intersection, curated
+- `CuratedFeed` with curator kickback
+- Publishing flow (post_id generation, envelope propagation)
+- Editing (mutable DataObject semantics, sequence versioning)
+- Replies, boosts, references
+- Media tiering (blurhash thumbnails on LoRa, full media on WiFi)
+- MHR-Name (scope-based naming, conflict resolution, petnames)
+
+**Acceptance**: A user publishes a post tagged with geographic and interest scopes. The post's envelope appears in subscribers' feeds. Readers pay to fetch full content. Kickback flows to author. Curated feeds work end-to-end.
+
+### Milestone 2.5: Test Networks
+
+- Deploy 3-5 physical test networks (urban, rural, campus, event)
+- Each network: 10-50 nodes (phones + LoRa relays) across at least 2 transports
+- Instrument for: routing convergence, gossip bandwidth, storage reliability, social UX
+- Run for at least 4 weeks per network
+- Document: failure modes, parameter tuning, real-world performance
+
+**Acceptance**: Test networks operate continuously for 4 weeks. Users report messaging and social features work reliably. Published test report with metrics.
+
+### Phase 2 Deliverable
+
+**A mesh social network with extended range.** Phones for messaging + social, $30 LoRa relays for range. Users can follow people, browse geographic and interest feeds, curate content, and host profiles — all without internet. Content propagates based on demand economics.
+
+---
+
+## Phase 3: Economic Layer + Token
+
+**Focus**: MHR token genesis, payment infrastructure, and the transition from free-only to a functioning mesh economy. Only now — with real users and real traffic — do economics matter.
+
+### Milestone 3.1: Payment Channels
 
 - VRF lottery implementation (ECVRF-ED25519-SHA512-TAI per RFC 9381)
 - Adaptive difficulty (local per-link, formula: `win_prob = target_updates / observed_packets`)
@@ -52,170 +179,112 @@ The Mehr implementation is organized into four phases, progressing from core net
 
 **Acceptance**: Two nodes relay 1,000 packets. The relay wins the VRF lottery approximately `1000 × win_probability` times (within 2σ). Channel updates occur only on wins. Settlement produces a valid dual-signed record. Dispute resolution correctly rejects old states.
 
-### Milestone 1.5: CRDT Ledger
+### Milestone 3.2: CRDT Ledger + Epoch Compaction
 
 - `AccountState` (GCounter for earned/spent, GSet for settlements)
 - GCounter merge (pointwise max per-node entries)
+- GCounter rebase at epoch compaction (prevents overflow from money velocity)
 - Settlement flow (validation: 2 sig checks + Blake3 hash + GSet dedup, gossip forward)
 - Balance derivation (`earned - spent`, reject negative)
-- Gossip integration (settlements propagate via Tier 2 bandwidth budget)
-
-**Acceptance**: Three nodes settle channels pairwise. All balances converge correctly across the mesh within O(log N) gossip rounds. Duplicate settlements are rejected. A forged settlement (bad signature) is silently dropped by all nodes.
-
-### Milestone 1.6: Hardware Targets
-
-- ESP32 + LoRa firmware (relay only: transport, routing, gossip, payment channels, CRDT ledger)
-- Raspberry Pi software (bridge: all ESP32 capabilities + multi-interface bridging + basic CLI)
-- CLI tools: `mehr-keygen`, `mehr-node` (start/stop), `mehr-status` (routing table, channels, balances), `mehr-peer` (add/remove trusted peers)
-
-**Acceptance**: An ESP32 node relays packets and earns VRF lottery wins. A Raspberry Pi bridges LoRa to WiFi. CLI tools show correct routing table, channel states, and balances. ESP32 firmware fits in flash and runs within 520 KB RAM.
-
-### Phase 1 Deliverable
-
-A working mesh network with cost-aware routing, encrypted links, stochastic micropayments, and a convergent CRDT ledger — running on real hardware (ESP32 + Raspberry Pi) with CLI management tools.
-
----
-
-## Phase 2: Economics
-
-**Focus**: Real-world deployment, economic mechanisms, and the minimum viable marketplace.
-
-### Milestone 2.1: Trust Neighborhoods
-
-- `TrustConfig` implementation (trusted peers, cost overrides, community labels)
-- Free relay logic (sender trusted AND destination trusted → no lottery)
-- Transitive credit (direct: full, friend-of-friend: 10%, 3+ hops: none)
-- Credit rate limiting per trust distance
-
-**Acceptance**: Trusted peers relay traffic for free with zero economic overhead. A friend-of-friend gets exactly 10% of the direct credit line. An untrusted node gets no transitive credit.
-
-### Milestone 2.2: Epoch Compaction
-
 - Epoch trigger logic (3-trigger: settlement count, GSet size, small-partition adaptive)
-- Epoch proposer selection (eligibility rules, conflict resolution)
-- Bloom filter construction (k=13 Blake3-derived, 0.01% FPR)
 - Epoch lifecycle (Propose → Acknowledge at 67% → Activate → Verify → Finalize)
-- Settlement proof submission during grace period
 - Merkle-tree snapshot (full on backbone, sparse on constrained)
-- `BalanceProof` generation and verification (~640 bytes for 1M nodes)
-- `RelayWinSummary` aggregation and spot-check verification
+- `BalanceProof` generation and verification
 
-**Acceptance**: A 20-node test network triggers epochs correctly under all three conditions. Bloom filter FPR is within 2× of theoretical 0.01%. Late-arriving settlements are recovered during the grace period. ESP32 nodes operate with sparse snapshots under 5 KB.
+**Acceptance**: A 20-node network triggers epochs correctly. Balances converge across the mesh. GCounter rebase keeps counters bounded. ESP32 nodes operate with sparse snapshots under 5 KB.
 
-### Milestone 2.3: Capability Discovery
+### Milestone 3.3: Token Genesis + Proof-of-Service Mining
 
-- `NodeCapabilities` advertisement structure (connectivity, compute, storage, availability)
-- `PresenceBeacon` (20 bytes, broadcast every 10 seconds)
-- Discovery rings (Ring 0 full, Ring 1 summarized, Ring 2 periodic, Ring 3 query-only)
-- Mobile handoff (beacon scan → relay selection → link establishment → channel open)
-- Credit-based fast start (`CreditGrant` with staleness tolerance and rate limiting)
-- Roaming cache (area fingerprint with 60% overlap tolerance, 30-day TTL)
+- Emission schedule implementation (10^12 μMHR/epoch, halving every 100,000 epochs, shift clamp at 63)
+- Tail emission floor (0.1% of circulating supply annually)
+- `RelayWinSummary` aggregation per epoch
+- Mint distribution proportional to verified VRF lottery wins
+- Channel-funded relay payments (coexist with minting)
 
-**Acceptance**: A mobile node (laptop) moves between two WiFi areas and hands off to a new relay within 500ms. Credit-based fast start allows immediate traffic while the channel opens. Returning to the first area reuses the cached channel with zero handoff latency.
+**Acceptance**: The first epoch mints MHR and distributes it to relay nodes. Distribution is proportional to wins. Minting and channel payments coexist. Token supply follows the emission schedule.
 
-### Milestone 2.4: Reputation
+### Milestone 3.4: Reputation + Credit
 
 - `PeerReputation` scoring (relay, storage, compute scores 0-10000)
 - Score update formulas (success: diminishing gains, failure: 10% penalty)
-- Trust-weighted referrals (1-hop, capped at 50%, weighted at 30% × trust, 500-round expiry)
-- Reputation integration with credit line sizing and capability selection
+- Trust-weighted referrals (1-hop, capped at 50%)
+- Transitive credit (direct: full, friend-of-friend: 10%, 3+ hops: none)
+- `CreditState` tracking per grantee
+- Credit rate limiting per trust distance and per epoch
 
-**Acceptance**: A node that successfully relays 100 packets has a relay score above 5000. A node that fails 3 out of 10 agreements has a score below 3000. Referral scores are capped at 5000 and overwritten by first-hand experience.
+**Acceptance**: Reliable nodes build reputation. Credit extends through trust graph. A friend-of-friend gets exactly 10% of the direct credit line. Default handling absorbs debt correctly.
 
-### Milestone 2.5: Test Networks
+### Milestone 3.5: Content Economics + Propagation
 
-- Deploy 3-5 physical test networks (urban, rural, indoor, mixed)
-- Each network: 10-50 nodes across at least 2 transport types
-- Instrument for: routing convergence time, payment overhead, epoch timing, gossip bandwidth
-- Run for at least 4 weeks per network
-- Document: failure modes, parameter tuning, real-world performance vs. spec predictions
+- Content propagation through scope hierarchy (neighborhood → city → region)
+- Demand-driven promotion (retrieval count thresholds)
+- Self-funding content detection (kickback exceeds storage cost)
+- Interest relay nodes (bridge topic communities across geography)
+- Local-first interest propagation (local validation before global spread)
+- Content governance (individual filtering, community standards, trust revocation)
 
-**Acceptance**: Test networks operate continuously for 4 weeks. Routing converges within spec. Payment overhead stays within 0.5% on LoRa. At least one epoch completes successfully per network. Published test report with metrics.
+**Acceptance**: Popular content auto-promotes from neighborhood to city scope. Self-funding content persists without author payment. Interest content propagates through relay nodes after local validation.
 
-### Phase 2 Deliverable
+### Milestone 3.6: Gateway Operators
 
-Test networks with functioning trust-based economics, epoch compaction, capability discovery, mobile handoff, and reputation scoring — validated on real hardware over multiple weeks.
+- Gateway trust-based onboarding (add consumer to trusted_peers, extend credit)
+- Fiat billing integration (subscription, prepaid, pay-as-you-go — gateway's choice)
+- Cloud storage via gateway (consumer stores files, gateway handles MHR)
+- Gateway-provided connectivity (ethernet ports, WiFi access points)
+
+**Acceptance**: A consumer signs up with a gateway, pays fiat, and uses the network without seeing MHR. Traffic flows through gateway trust. Consumer can switch gateways without losing identity.
+
+### Phase 3 Deliverable
+
+**A functioning mesh economy.** MHR tokens enter circulation through proof-of-service. Relay operators earn by forwarding traffic. Content creators earn through kickback. Gateway operators bridge fiat consumers to the mesh economy. The economic layer is live, validated on real networks.
 
 ---
 
-## Phase 3: Services
+## Phase 4: Full Ecosystem
 
-**Focus**: Service primitives and first applications.
+**Focus**: Advanced capabilities, application richness, and ecosystem growth.
 
-### Milestone 3.1: MHR-Store
+### Milestone 4.1: Identity + Governance
 
-- `DataObject` types (Immutable, Mutable, Ephemeral)
-- Storage agreements (bilateral, pay-per-duration)
-- Proof of storage (Blake3 Merkle challenge-response)
-- Erasure coding (Reed-Solomon, default schemes by size)
-- Repair protocol (detect failure → assess → reconstruct → re-store)
-- Garbage collection (7-tier priority)
+- Identity claims and vouches (GeoPresence, CommunityMember, KeyRotation, Capability, ExternalIdentity)
+- RadioRangeProof (geographic verification via LoRa beacons)
+- Peer attestation and transitive confidence
+- Vouch lifecycle (create, gossip, verify, renew, revoke)
+- Voting prerequisites (geographic eligibility from verified claims)
 
-### Milestone 3.2: MHR-DHT
-
-- DHT routing (XOR distance + cost weighting, α=0.7)
-- k=3 replication with cost-bounded storage set
-- Lookup and publication protocols
-- Cache management (publisher TTL, 24-hour local cap, LRU eviction)
-- Light client verification (3-tier: content-hash, signature, multi-source)
-
-### Milestone 3.3: MHR-Pub
-
-- Subscription types (Key, Prefix, Node, Neighborhood)
-- Delivery modes (Push, Digest, PullHint)
-- Bandwidth-adaptive mode selection
-
-### Milestone 3.4: MHR-Compute (MHR-Byte)
+### Milestone 4.2: MHR-Compute (MHR-Byte)
 
 - 47-opcode interpreter implementation in Rust
 - Cycle cost enforcement (ESP32-calibrated)
 - Resource limit enforcement (max_memory, max_cycles, max_state_size)
 - Compute delegation via capability marketplace
 - Reference test vector suite for cross-platform conformance
-
-### Milestone 3.5: Applications
-
-- Messaging (E2E encrypted, store-and-forward, group messaging with co-admin delegation)
-- Social (profiles, feeds, followers, media tiering)
-- MHR-Name (community-label-scoped naming, conflict resolution, petnames)
-
-### Phase 3 Deliverable
-
-Usable messaging and social applications running on the mesh, with decentralized storage, DHT-based content discovery, and contract execution on constrained devices.
-
----
-
-## Phase 4: Ecosystem
-
-**Focus**: Advanced capabilities and ecosystem growth.
-
-### Milestone 4.1: Advanced Compute
-
 - WASM execution environment for gateway/backbone nodes
-- Private compute tiers (Split Inference, Secret Sharing, TEE)
-- Heavy compute capabilities (ML inference, transcription, TTS)
 
-### Milestone 4.2: Rich Applications
+### Milestone 4.3: Rich Applications
 
-- Voice (Codec2 on LoRa, Opus on WiFi, bandwidth bridging)
+- Voice (Codec2 on LoRa, Opus on WiFi, bandwidth bridging, seamless handoff)
+- Digital licensing (LicenseOffer, LicenseGrant, verification chain, off-network verifiability)
+- Cloud storage (client-side encryption, erasure coding, sync between devices, file sharing)
 - Forums (append-only logs, moderation contracts)
 - Marketplace (listings, escrow contracts)
-- Wiki (CRDT-merged collaborative documents)
 
-### Milestone 4.3: Interoperability
+### Milestone 4.4: Interoperability + Privacy
 
 - Third-party protocol bridges (SSB, Matrix, Briar) — [standalone gateway services](design-decisions#protocol-bridges-standalone-gateway-services) with identity attestation
 - Onion routing implementation (`PathPolicy.ONION_ROUTE`, per-packet layered encryption)
+- Private compute tiers (Split Inference, Secret Sharing, TEE)
 
-### Milestone 4.4: Ecosystem Growth
+### Milestone 4.5: Ecosystem Growth
 
-- Hardware partnerships and reference design refinement
 - Developer SDK and documentation
 - Community-driven capability development
+- Hardware partnerships and reference design refinement (informed by real deployment data)
+- Custom hardware (only if demand justifies — let usage data guide form factors)
 
 ### Phase 4 Deliverable
 
-A full-featured decentralized platform with rich applications, privacy-enhanced routing, and interoperability with existing protocols.
+A full-featured decentralized platform with rich applications, privacy-enhanced routing, identity governance, and interoperability with existing protocols.
 
 ---
 
@@ -227,16 +296,45 @@ The primary implementation language is **Rust**, chosen for:
 - `no_std` support for ESP32 firmware
 - Strong ecosystem for cryptography and networking
 - Single codebase from microcontroller to server
+- FFI to Kotlin (Android) and Swift (iOS) for phone apps
+
+## Platform Targets
+
+| Platform | Implementation | Phase |
+|----------|---------------|-------|
+| Android phone | Rust core + Kotlin UI via FFI | Phase 1 |
+| iOS phone | Rust core + Swift UI via FFI | Phase 1 |
+| Raspberry Pi / Linux | Rust native (bridge, gateway, storage) | Phase 1-2 |
+| ESP32 + LoRa | Rust `no_std` (L1 relay) | Phase 2 |
+| Desktop (Linux, macOS, Windows) | Rust native (full node) | Phase 2 |
+
+All implementations speak the same wire protocol and interoperate on the same network.
 
 ## Test Network Strategy
 
 Real physical test networks, not simulations:
 
-- Simulation cannot capture the realities of LoRa propagation, WiFi interference, and real-world device failure modes
-- Each test network should represent a different deployment scenario (urban, rural, indoor, mixed)
-- Test networks validate both the protocol and the economic model
+- Simulation cannot capture the realities of radio propagation, WiFi interference, and real-world device failure modes
+- Each test network should represent a different deployment scenario (campus, urban, rural, event)
+- Test networks validate both the protocol and the user experience
+- Phase 1 test networks are phone-only (WiFi/BLE mesh)
+- Phase 2 test networks add LoRa relays
+- Phase 3 test networks enable economics and measure token dynamics
 
-## Phase 1 Implementability Assessment
+## Why This Order
+
+The old roadmap (protocol-first, hardware-first) would produce a working mesh with no users. This roadmap produces users first, then gives them progressively more capabilities:
+
+| Phase | What Users Get | What the Network Gets |
+|-------|---------------|---------------------|
+| 1 | Encrypted mesh messaging on phones | Real users, real trust graphs |
+| 2 | Social feeds, extended range, content | Real content, real traffic patterns |
+| 3 | Token economy, earning/spending, gateways | Real economic data, real market pricing |
+| 4 | Rich apps, privacy, interoperability | Mature ecosystem |
+
+Each phase is viable on its own. Phase 1 is a useful product even if Phase 2 never ships. Phase 2 is a useful product even if economics never launches. No phase depends on token speculation or hardware manufacturing for its value.
+
+## Implementability Assessment
 
 Phase 1 is **fully implementable** with the current specification. All protocol-level gaps have been resolved:
 
@@ -247,6 +345,9 @@ Phase 1 is **fully implementable** with the current specification. All protocol-
 | Routing + Announce propagation | Complete (scoring, announce rules, expiry, failure detection) | [Network Protocol](../protocol/network-protocol#routing) |
 | Gossip protocol | Complete (bloom filter, bandwidth budget, 4-tier) | [Network Protocol](../protocol/network-protocol#gossip-protocol) |
 | Congestion control | Complete (3-layer, priority levels, backpressure) | [Network Protocol](../protocol/network-protocol#congestion-control) |
+| Trust neighborhoods | Complete (free relay, credit, scopes) | [Trust & Neighborhoods](../economics/trust-neighborhoods) |
+| Messaging | Complete (E2E, store-and-forward, groups) | [Messaging](../applications/messaging) |
+| Social layer | Complete (envelope/post, feeds, curation, editing) | [Social](../applications/social) |
 | VRF lottery + Payment channels | Complete (RFC 9381, difficulty formula, channel lifecycle) | [Payment Channels](../economics/payment-channels) |
-| CRDT ledger + Settlement | Complete (validation rules, GCounter merge, GSet dedup) | [CRDT Ledger](../economics/crdt-ledger) |
+| CRDT ledger + Settlement | Complete (validation rules, GCounter merge, GSet dedup, rebase) | [CRDT Ledger](../economics/crdt-ledger) |
 | Hardware targets | Complete (ESP32 + Pi reference designs) | [Reference Designs](../hardware/reference-designs) |

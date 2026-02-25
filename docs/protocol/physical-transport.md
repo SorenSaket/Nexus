@@ -11,7 +11,7 @@ Mehr requires a transport layer that provides transport-agnostic networking over
 
 The transport layer must provide:
 
-- **Any medium is a valid link**: LoRa, WiFi, Ethernet, serial, packet radio, fiber, free-space optical
+- **Any medium is a valid link**: LoRa, LTE-M, NB-IoT, WiFi, Ethernet, serial, packet radio, fiber, free-space optical
 - **Multiple simultaneous interfaces**: A node can bridge between transports automatically
 - **Announce-based routing**: No manual configuration of addresses, subnets, or routing tables
 - **Mandatory encryption**: All traffic is encrypted; unencrypted packets are dropped as invalid
@@ -57,6 +57,8 @@ All implementations speak the same wire protocol and interoperate on the same ne
 | **WiFi Ad-hoc** | 10-300 Mbps | 50-200 m | Full | Ubiquitous, short range |
 | **WiFi P2P (directional)** | 100-800 Mbps | 1-10 km | Full | Point-to-point backbone links |
 | **Cellular (LTE/5G)** | 1-100 Mbps | Via carrier | Full | Requires carrier subscription |
+| **LTE-M** | 0.375-1 Mbps | Via carrier | Full | Licensed LPWAN; better building penetration than LoRa, carrier-managed |
+| **NB-IoT** | 0.02-0.25 Mbps | Via carrier | Half | Licensed LPWAN; extreme range and battery life, carrier-managed |
 | **Ethernet** | 100 Mbps-10 Gbps | Local | Full | Backbone, data center |
 | **Serial (RS-232, AX.25)** | 1.2-56 kbps | Varies | Half | Legacy radio, packet radio |
 | **Fiber** | 1-100 Gbps | Long haul | Full | Backbone |

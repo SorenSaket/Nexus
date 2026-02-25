@@ -118,29 +118,53 @@ Credit accounting:
 
 ## Hierarchical Scopes
 
-Nodes self-assign **scopes** that describe where they are and what they care about. Scopes replace the flat `community_label` with a hierarchical system that supports both geographic locality and interest communities.
+Nodes self-assign **scopes** — hierarchical namespaces that describe where they are and what they care about. Scopes replace the flat `community_label` with a structured system that supports both place-based communities and interest communities.
 
 ```
 HierarchicalScope {
     scope_type: enum {
-        Geo,    // physical location hierarchy
+        Geo,    // place hierarchy (physical or virtual)
         Topic,  // interest/community hierarchy
     },
     segments: Vec<String>,    // hierarchical path, max 8 levels, max 32 chars each
 }
 ```
 
-### Geographic Scopes
+Scopes are **hierarchical namespaces**, similar to URLs. The `segments` are arbitrary strings — they can describe physical locations, virtual spaces, organizations, or anything else. The `scope_type` signals **propagation intent**, not physicality: `Geo` means "this is a place where members are dense and nearby each other" (whether physically or virtually), while `Topic` means "this is an interest that spans across places."
 
-Geographic scopes describe physical location, from broad to narrow:
+### Geo Scopes
+
+Geo scopes describe **places** — physical locations, virtual spaces, or any community with dense, place-like membership:
 
 ```
-Alice sets:  Geo("north-america", "us", "oregon", "portland", "hawthorne")
-Bob sets:    Geo("north-america", "us", "oregon", "portland", "pearl")
-Carol sets:  Geo("asia", "iran", "tehran", "district-6")
+Geo scope examples:
+
+  Physical locations:                    Virtual places:
+
+  north-america                          cyberspace
+  └── us                                 └── guild-wars
+      ├── oregon                         │   ├── server-42
+      │   ├── portland                   │   └── server-7
+      │   │   ├── hawthorne ◀── Alice    │
+      │   │   └── pearl     ◀── Bob     └── discord
+      │   ├── eugene                         └── mehr-dev ◀── Dave
+      │   └── bend
+      └── california                     organizations
+          └── ...                        └── university
+                                             └── mit
+  asia                                       └── csail ◀── Eve
+  └── iran
+      └── tehran
+          └── district-6   ◀── Carol
 ```
 
-The hierarchy is **bottom-up** — neighbors form the base, cities emerge from connected neighborhoods, regions from connected cities. This mirrors how mesh networks physically grow: you connect to the person next door first, then the neighborhood, then the city.
+```
+Physical:  Geo("north-america", "us", "oregon", "portland", "hawthorne")
+Virtual:   Geo("cyberspace", "guild-wars", "server-42")
+Org:       Geo("organizations", "university", "mit", "csail")
+```
+
+The hierarchy is **bottom-up** — neighbors form the base, cities emerge from connected neighborhoods, regions from connected cities. This applies equally to physical and virtual places: you join a game server first, then discover the broader game community, then the gaming umbrella. The pattern is the same — local connections aggregate into larger structures.
 
 ### Interest Scopes
 
@@ -176,15 +200,18 @@ Scopes retain all the properties of the old `community_label`:
 - **Free-form strings** — all segments are arbitrary strings. Communities converge on naming through social consensus (e.g., "portland" not "pdx"), the same way they do today. No ISO codes, no standardized taxonomy, no gatekeeping.
 - **Used by services** — [MHR-Name](../applications/naming) scopes names by geographic scope, [MHR-Pub](../services/mhr-pub) supports `Scope(match)` subscriptions, [MHR-DHT](../services/mhr-dht#neighborhood-scoped-dht) uses scopes for content propagation boundaries, and the [Social](../applications/social) layer uses scopes for geographic and interest feeds
 
-### Geographic Scope Verification
+### Geo Scope Verification
 
-Geographic scopes can be **verified** through bottom-up aggregation — see [Identity Claims](../applications/identity) for the full verification protocol. In summary:
+Geo scopes can optionally be **verified** — see [Identity Claims](../applications/identity) for the full verification protocol. Verification methods vary by the kind of place:
 
-- **Neighborhood level**: Verified by [RadioRangeProof](../applications/identity#radiorangeproof) — if you can hear a node's LoRa beacon, you're within physical range (~1–15 km)
-- **City level**: Verified by aggregating multiple verified neighborhood claims within the city
-- **Region/Country level**: Verified by aggregating verified city claims within the region
+| Place Type | Verification Method | Precision |
+|-----------|-------------------|-----------|
+| **Physical neighborhood** | [RadioRangeProof](../applications/identity#radiorangeproof) — if you can hear a node's LoRa beacon, you're within physical range | ~1–15 km |
+| **Physical city/region** | Bottom-up aggregation of verified neighborhood claims | Aggregated |
+| **Virtual space** | Application-specific (e.g., server-signed attestation, invite-chain, admin vouch) | Varies |
+| **Organization** | Peer attestation from existing verified members | Social |
 
-Interest scopes are **never verified** — anyone can declare interest in Pokemon. Verification only matters for geographic claims because they're prerequisites for geographic voting and local governance (see [Voting](../applications/voting)).
+Interest scopes are **never verified** — anyone can declare interest in Pokemon. Verification matters for geo scopes that carry governance weight (see [Voting](../applications/voting)) — a node cannot vote on Portland issues without a verified Portland-area presence claim. Unverified geo scopes are still useful for content routing and feed subscriptions; they just don't carry voting rights.
 
 ### Wire Format
 
@@ -211,16 +238,17 @@ Migration:
   New nodes: read scopes, fall back to community_label if scopes is empty
 ```
 
-### Geographic vs. Interest: Two Dimensions of Community
+### Geo vs. Topic: Two Dimensions of Community
 
-| | Geographic Scopes | Interest Scopes |
+| | Geo Scopes (Places) | Topic Scopes (Interests) |
 |---|---|---|
-| **Density** | Dense — most people are somewhere | Sparse — niche interests span the globe |
-| **Propagation** | Bottom-up through physical proximity | Wide, across geography |
-| **Verification** | RadioRangeProof + peer vouches | None needed (self-declared) |
+| **Density** | Dense — members are nearby each other | Sparse — members are scattered |
+| **Propagation** | Bottom-up through proximity | Wide, across places |
+| **Verification** | RadioRangeProof (physical), attestation (virtual), or none | None needed (self-declared) |
 | **Content cost** | Cheap locally, expensive globally | Depends on relay distance |
-| **Voting** | Enables geographic voting | No voting implications |
-| **Examples** | `Geo("north-america", "us", "oregon", "portland")` | `Topic("gaming", "pokemon")` |
+| **Voting** | Enables scoped voting (if verified) | No voting implications |
+| **Physical examples** | `Geo("north-america", "us", "oregon", "portland")` | `Topic("gaming", "pokemon")` |
+| **Virtual examples** | `Geo("cyberspace", "guild-wars", "server-42")` | `Topic("science", "physics")` |
 
 A single post can have **both** a geographic and interest scope. A post tagged `Geo("portland") + Topic("gaming", "pokemon")` appears in both the Portland local feed and the global Pokemon feed. Intersection queries ("Portland Pokemon") are resolved client-side by filtering on both scopes.
 

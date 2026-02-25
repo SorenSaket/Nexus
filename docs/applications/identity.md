@@ -45,7 +45,7 @@ IdentityClaim {
 
 | Type | Purpose | Verification Method | Requires Proof? |
 |------|---------|-------------------|----------------|
-| **GeoPresence** | "I am physically in this location" | [RadioRangeProof](#radiorangeproof) + peer vouches | Yes |
+| **GeoPresence** | "I am present in this place" | Physical: [RadioRangeProof](#radiorangeproof) + peer vouches. Virtual: application-specific attestation | Depends on place type |
 | **CommunityMember** | "I participate in this interest community" | Self-declared, no verification needed | No |
 | **KeyRotation** | "My old key migrated to this new key" | Must be signed by both old and new keys | Yes |
 | **Capability** | "I provide this service" | [Proof-of-service](../marketplace/verification) challenge-response | Yes |
@@ -102,6 +102,28 @@ Total: 113 bytes. Lightweight enough to gossip freely.
 
 ## Verification Methods
 
+```
+                    Verification Hierarchy
+
+  Country ─── aggregation of regions ──────────────── Lowest precision
+     │
+  Region ──── aggregation of cities
+     │
+  City ────── aggregation of neighborhoods
+     │
+  Neighborhood ── RadioRangeProof (LoRa beacons) ──── Highest precision
+     │
+  ┌──┴────────────────────────────────────────┐
+  │  [Alice]  ···radio···  [Bob]              │
+  │     │                    │                │
+  │   witness              witness            │
+  │     │                    │                │
+  │     └──── [Prover] ─────┘                 │
+  │           broadcasts                      │
+  │           signed beacon                   │
+  └───────────────────────────────────────────┘
+```
+
 ### RadioRangeProof
 
 The mesh-native equivalent of physical presence verification. If you can hear a node's LoRa radio, you're within physical range.
@@ -137,11 +159,11 @@ Witness {
 | WiFi | 30–100 m | Building level |
 | Bluetooth | 10–30 m | Room level |
 
-RadioRangeProof verifies **neighborhood-level** geographic claims. It cannot verify city, region, or country claims directly — those use bottom-up aggregation.
+RadioRangeProof verifies **neighborhood-level** physical geo claims. It cannot verify city, region, or country claims directly — those use bottom-up aggregation. It also cannot verify virtual geo scopes (game servers, organizations) — those use application-specific verification such as server-signed attestations, admin vouches, or invite-chain proofs, handled at the application layer.
 
-### Bottom-Up Geographic Aggregation
+### Bottom-Up Aggregation (Physical Geo Scopes)
 
-Higher-level geographic claims are verified by aggregating verified sub-scope claims:
+Higher-level physical geo claims are verified by aggregating verified sub-scope claims:
 
 ```
 Verification levels:

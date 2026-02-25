@@ -3,6 +3,7 @@ import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 const sidebars: SidebarsConfig = {
   docsSidebar: [
     'introduction',
+    'eli5',
     'faq',
     {
       type: 'category',
@@ -24,6 +25,7 @@ const sidebars: SidebarsConfig = {
         'economics/crdt-ledger',
         'economics/trust-neighborhoods',
         'economics/propagation',
+        'economics/content-governance',
         'economics/real-world-impact',
       ],
     },
@@ -61,6 +63,9 @@ const sidebars: SidebarsConfig = {
         'applications/naming',
         'applications/community-apps',
         'applications/voting',
+        'applications/licensing',
+        'applications/cloud-storage',
+        'applications/roaming',
         'applications/hosting',
       ],
     },
@@ -80,6 +85,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'development/roadmap',
         'development/design-decisions',
+        'development/versioning',
         'development/open-questions',
       ],
     },

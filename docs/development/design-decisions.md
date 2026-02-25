@@ -79,13 +79,13 @@ This page documents the key architectural decisions made during Mehr protocol de
 | **Alternatives** | Mandatory onion routing for all traffic |
 | **Rationale** | Onion routing adds 21% payload overhead on LoRa — unacceptable as a default for all traffic. Omitting the source address is free and effective against casual observation. Per-packet layered encryption is available opt-in via `PathPolicy.ONION_ROUTE` for users who need stronger traffic analysis resistance. |
 
-## Naming: Neighborhood-Scoped, No Global Namespace
+## Naming: Scope-Based, No Global Namespace
 
 | | |
 |---|---|
-| **Chosen** | Community-label-scoped names (e.g., `alice@portland-mesh`) |
-| **Alternatives** | Global names via consensus |
-| **Rationale** | Global consensus contradicts partition tolerance. Community labels are self-assigned and informational — no authority, no uniqueness enforcement. Multiple disjoint clusters can share a label; resolution is proximity-based. Local petnames provide a fallback. |
+| **Chosen** | Hierarchical-scope-based names (e.g., `alice@geo:us/oregon/portland`) |
+| **Alternatives** | Global names via consensus, flat community labels (v0.8 `alice@portland-mesh`) |
+| **Rationale** | Global consensus contradicts partition tolerance. Flat community labels were replaced by [hierarchical scopes](../economics/trust-neighborhoods#hierarchical-scopes) — geographic (`Geo`) and interest (`Topic`) — which provide structured resolution. Names resolve against scope hierarchy: `alice@geo:portland` queries Portland scope first, then broadens. Two different cities named "portland" are disambiguated by longer paths (`alice@geo:us/oregon/portland` vs `alice@geo:us/maine/portland`). Proximity-based resolution handles most cases naturally. Local petnames provide a fallback. |
 
 ## Cost Annotations: Compact Path Cost (No Per-Relay Signatures)
 
