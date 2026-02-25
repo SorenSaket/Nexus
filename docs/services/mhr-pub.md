@@ -16,12 +16,21 @@ Subscription {
         Key(hash),              // specific key changed
         Prefix(hash_prefix),    // any key with prefix changed
         Node(NodeID),           // any publication by this node
-        Neighborhood(label),    // any publication in this community label
+        Neighborhood(label),    // any publication in this community label (deprecated)
+        Scope(ScopeMatch),      // any publication matching a hierarchical scope
     },
     delivery: enum {
         Push,                   // immediate, full payload
         Digest,                 // batched summaries, periodic
         PullHint,               // hash-only notification
+    },
+}
+
+ScopeMatch {
+    scope: HierarchicalScope,   // from trust-neighborhoods
+    match_mode: enum {
+        Exact,                  // this scope level only
+        Prefix,                 // this scope and all children
     },
 }
 ```
@@ -33,7 +42,8 @@ Subscription {
 | **Key** | Watch a specific data object for changes (e.g., a friend's profile) |
 | **Prefix** | Watch a category of keys (e.g., all posts in a forum) |
 | **Node** | Follow all publications from a specific user |
-| **Neighborhood** | Watch all activity from nodes with a given community label |
+| **Neighborhood** | Watch all activity from nodes with a given community label (deprecated — use Scope) |
+| **Scope** | Watch all activity matching a [hierarchical scope](../economics/trust-neighborhoods#hierarchical-scopes) — geographic or interest |
 
 ## Delivery Modes
 
@@ -81,3 +91,94 @@ The pub/sub system doesn't make this decision — the application does, based on
 | Push | Full object size | WiFi, Ethernet |
 | Digest | ~50 bytes per item (hash + summary) | Moderate links |
 | PullHint | ~32 bytes (hash only) | LoRa, constrained links |
+
+### Envelope-Aware Delivery
+
+For [Social](../applications/social) content, MHR-Pub notifications carry the [PostEnvelope](../applications/social#postenvelope-free-layer) — the free preview layer — rather than the full post:
+
+| Delivery Mode | What's Delivered | Reader Cost |
+|--------------|-----------------|-------------|
+| Push | Full PostEnvelope (~300-500 bytes) | Free |
+| Digest | Batched envelopes (headline + hash per item) | Free |
+| PullHint | Post hash only (32 bytes) | Free (envelope fetched on demand) |
+
+In all modes, the reader browses envelopes at zero cost. Fetching the full [SocialPost](../applications/social#socialpost-paid-layer) content is a separate, paid retrieval from the storage node. This separation means even LoRa nodes on PullHint subscriptions can browse headlines and decide what's worth fetching over a higher-bandwidth link later.
+
+## Scope Subscriptions
+
+Scope subscriptions are the primary mechanism for geographic feeds, interest feeds, and community content discovery. They build on [Hierarchical Scopes](../economics/trust-neighborhoods#hierarchical-scopes) to enable structured content routing.
+
+### Geographic Feeds
+
+Subscribe to content from a geographic area at any level of the hierarchy:
+
+```
+// All posts from Portland
+subscribe(Scope(Geo("north-america", "us", "oregon", "portland"), Exact), Push);
+
+// All posts from anywhere in Oregon
+subscribe(Scope(Geo("north-america", "us", "oregon"), Prefix), Digest);
+```
+
+Geographic scope subscriptions naturally bias toward local content — nearby nodes have cheaper relay paths and higher cache density, so local content arrives faster and costs less.
+
+### Interest Feeds
+
+Subscribe to content by topic at any level of the hierarchy:
+
+```
+// All Pokemon content globally
+subscribe(Scope(Topic("gaming", "pokemon"), Prefix), Digest);
+
+// Only competitive Pokemon
+subscribe(Scope(Topic("gaming", "pokemon", "competitive"), Exact), Push);
+```
+
+Interest subscriptions are **sparse** — they span geography. A Pokemon subscription connects Portland, Tokyo, and Berlin through interest relay nodes that bridge geographic clusters.
+
+### Intersection Feeds
+
+A client can subscribe to both a geographic and interest scope simultaneously and filter locally for the intersection:
+
+```
+// Subscribe to Portland content AND Pokemon content
+subscribe(Scope(Geo("north-america", "us", "oregon", "portland"), Exact), Push);
+subscribe(Scope(Topic("gaming", "pokemon"), Prefix), Push);
+
+// Client-side: show posts that appear in BOTH feeds
+// Result: Portland Pokemon community
+```
+
+Intersection is always client-side — the protocol delivers by individual scope, and the application composes.
+
+### Scope Routing
+
+When a node publishes with scopes, notifications propagate to subscribers at each level:
+
+```
+Post published with scopes:
+  Geo("north-america", "us", "oregon", "portland", "hawthorne")
+  Topic("gaming", "pokemon")
+
+Notifications delivered to:
+  Scope(Geo("...", "hawthorne"), Exact)     ✓  exact match
+  Scope(Geo("...", "portland"), Prefix)      ✓  portland covers hawthorne
+  Scope(Geo("...", "oregon"), Prefix)        ✓  oregon covers portland
+  Scope(Topic("gaming", "pokemon"), Exact)   ✓  exact match
+  Scope(Topic("gaming"), Prefix)             ✓  gaming covers pokemon
+  Scope(Geo("...", "seattle"), Exact)        ✗  wrong city
+  Scope(Topic("science"), Prefix)            ✗  wrong topic
+```
+
+### Delivery Mode by Scope Level
+
+Applications should select delivery mode based on both link quality and scope breadth:
+
+| Scope Level | Typical Volume | Recommended Default |
+|-------------|---------------|-------------------|
+| Neighborhood | Low | Push |
+| City | Moderate | Push or Digest |
+| Region | High | Digest |
+| Country/Global | Very high | PullHint |
+| Narrow interest topic | Low-moderate | Push |
+| Broad interest topic | High | Digest |

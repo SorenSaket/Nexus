@@ -5,22 +5,25 @@ title: Naming
 
 # Naming (MHR-Name)
 
-MHR-Name provides human-readable names scoped to community labels. There is no global namespace — names resolve locally based on proximity and trust.
+MHR-Name provides human-readable names scoped to [hierarchical scopes](../economics/trust-neighborhoods#hierarchical-scopes). There is no global namespace — names resolve locally based on proximity and trust.
 
-## Community-Scoped Names
+## Scope-Based Names
 
-Names follow the format `name@community-label`:
+Names follow the format `name@scope`:
 
 ```
-maryam@tehran-mesh
-alice@portland-mesh
-relay-7@backbone-west
+maryam@geo:tehran
+alice@geo:portland
+relay-7@geo:backbone-west
+pikachu-fan@topic:gaming/pokemon
 ```
+
+The scope portion uses the [HierarchicalScope](../economics/trust-neighborhoods#hierarchical-scopes) format. Geographic scopes are prefixed with `geo:`, interest scopes with `topic:`.
 
 Resolution works by proximity:
 
-1. Parse the community label from the name (`portland-mesh`)
-2. Search nearby nodes with that `community_label` set
+1. Parse the scope from the name (e.g., `geo:portland`)
+2. Search nearby nodes whose scopes match
 3. Within that cluster, resolve the name via local naming records
 4. Use the returned NodeID for routing
 
@@ -28,11 +31,11 @@ Resolution works by proximity:
 
 A global namespace requires global consensus on name ownership. Global consensus contradicts Mehr's partition tolerance requirement. If two partitioned networks both register the name "alice," there is no partition-safe way to resolve the conflict.
 
-Community-scoped names solve this:
-- Names are locally consistent within their trust neighborhood
-- Different communities can have different "alice" users — they are `alice@portland-mesh` and `alice@tehran-mesh`
+Scope-based names solve this:
+- Names are locally consistent within their scope
+- Different communities can have different "alice" users — they are `alice@geo:portland` and `alice@geo:tehran`
 - No global coordination needed
-- Community labels are self-assigned, not centrally managed
+- Scopes are self-assigned, not centrally managed
 
 ## Name Registration
 
@@ -40,28 +43,41 @@ Names are registered locally by announcing a name binding:
 
 ```
 NameBinding {
-    name: String,               // "alice"
-    community_label: String,    // "portland-mesh"
+    name: String,                       // "alice"
+    scope: HierarchicalScope,           // Geo("portland") or Topic("gaming", "pokemon")
     node_id: NodeID,
     signature: Ed25519Signature,
 }
 ```
 
-Name bindings propagate via gossip within the trust neighborhood. Conflicts (two nodes claiming the same name in the same community label) are resolved by precedence:
+Name bindings propagate via gossip within the matching scope. Conflicts (two nodes claiming the same name in the same scope) are resolved by precedence:
 
 1. **Trust-weighted** (highest priority) — if one claimant is in your trust graph and the other is not, the trusted claimant wins regardless of timing. Between two trusted claimants, the one with the shorter trust distance wins.
 2. **First-seen** (tiebreaker) — if both claimants have equal trust status (both trusted at the same distance, or both untrusted), the first binding your node received wins.
 3. **Local petnames** (ultimate fallback) — if you need guaranteed resolution regardless of conflicts, assign a local petname (see below). Petnames override all network name resolution.
 
-## Cross-Community Resolution
+## Cross-Scope Resolution
 
-To resolve a name in a different community:
+To resolve a name in a different scope:
 
-1. Query propagates toward nodes with the target community label
+1. Query propagates toward nodes whose scopes match the target
 2. Nearest matching cluster responds with the name binding
 3. Result is cached locally with a TTL
 
-Because community labels are not unique, resolution finds the **nearest** cluster with that label. This is usually what you want — `alice@portland-mesh` resolves to the Portland cluster nearest to you.
+Because scopes are self-assigned, resolution finds the **nearest** cluster with that scope. This is usually what you want — `alice@geo:portland` resolves to the Portland cluster nearest to you.
+
+**Collision across regions**: Two different cities named "portland" (e.g., Portland, Oregon and Portland, Maine) would both match `geo:portland`. Proximity-based resolution handles this naturally — you'll reach whichever Portland is closer in the mesh. To disambiguate explicitly, use a longer scope path: `alice@geo:us/oregon/portland` vs. `alice@geo:us/maine/portland`.
+
+## Backward Compatibility
+
+The old `name@community-label` format maps to the new scope format:
+
+```
+alice@portland-mesh  →  alice@geo:portland
+relay-7@backbone-west  →  relay-7@geo:backbone-west
+```
+
+Nodes running older software continue to use the flat `community_label` field. New nodes check both `scopes` and `community_label` for resolution.
 
 ## Local Petnames
 

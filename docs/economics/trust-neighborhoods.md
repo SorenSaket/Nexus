@@ -22,7 +22,10 @@ TrustConfig {
     // Per-peer cost overrides (discount for friends-of-friends, etc.)
     cost_overrides: Map<NodeID, u64>,
 
-    // Optional self-assigned label (purely informational)
+    // Self-assigned scopes — geographic and interest (purely informational)
+    scopes: Vec<HierarchicalScope>,     // max 8 per node
+
+    // DEPRECATED: use scopes instead. Kept for backward compatibility.
     community_label: Option<String>,    // e.g., "portland-mesh"
 }
 ```
@@ -113,24 +116,113 @@ Credit accounting:
       the defaulted amount (absorbs debt); grantee is flagged
 ```
 
-## Community Labels
+## Hierarchical Scopes
 
-Nodes can optionally self-assign a `community_label` string:
+Nodes self-assign **scopes** that describe where they are and what they care about. Scopes replace the flat `community_label` with a hierarchical system that supports both geographic locality and interest communities.
 
 ```
-Alice sets:  community_label = "portland-mesh"
-Bob sets:    community_label = "portland-mesh"
-Carol sets:  community_label = "portland-mesh"
+HierarchicalScope {
+    scope_type: enum {
+        Geo,    // physical location hierarchy
+        Topic,  // interest/community hierarchy
+    },
+    segments: Vec<String>,    // hierarchical path, max 8 levels, max 32 chars each
+}
 ```
 
-This label is:
-- **Self-assigned** — no one approves it, no authority enforces uniqueness
-- **Not authoritative** — it carries no protocol-level privileges (it cannot grant access, waive fees, or modify trust)
-- **Not unique** — multiple disjoint clusters can use the same label
-- **Used by services** — [MHR-Name](../applications/naming) scopes human-readable names by label, [MHR-Pub](../services/mhr-pub) supports `Neighborhood(label)` subscriptions, and [MHR-DHT](../services/mhr-dht#neighborhood-scoped-dht) uses labels for content scoping
-- **Useful for discovery** — "find nodes labeled 'portland-mesh' near me"
+### Geographic Scopes
 
-Community labels enable human-readable naming and discovery without any of the governance overhead of explicit zones.
+Geographic scopes describe physical location, from broad to narrow:
+
+```
+Alice sets:  Geo("north-america", "us", "oregon", "portland", "hawthorne")
+Bob sets:    Geo("north-america", "us", "oregon", "portland", "pearl")
+Carol sets:  Geo("asia", "iran", "tehran", "district-6")
+```
+
+The hierarchy is **bottom-up** — neighbors form the base, cities emerge from connected neighborhoods, regions from connected cities. This mirrors how mesh networks physically grow: you connect to the person next door first, then the neighborhood, then the city.
+
+### Interest Scopes
+
+Interest scopes describe communities of shared interest that span geography:
+
+```
+Dave sets:   Topic("gaming", "pokemon", "competitive")
+Eve sets:    Topic("science", "physics", "quantum")
+Frank sets:  Topic("music", "jazz")
+```
+
+Interest communities are **sparse** — not everyone in Portland cares about Pokemon. A Pokemon community might span Portland, Tokyo, and Berlin with nothing in between. This is the opposite of geographic scopes, which are **dense** (most people are physically somewhere).
+
+### Scope Matching
+
+Subscriptions and queries can match at any level of the hierarchy:
+
+| Pattern | Matches |
+|---------|---------|
+| `Geo("north-america", "us", "oregon", "portland")` exact | Only Portland |
+| `Geo("north-america", "us", "oregon")` prefix | Portland, Eugene, Bend, and everything in Oregon |
+| `Geo("north-america", "us")` prefix | All US scopes |
+| `Topic("gaming")` prefix | Pokemon, Minecraft, and all gaming sub-topics |
+| `Topic("gaming", "pokemon")` exact | Only Pokemon, not gaming broadly |
+
+### Properties
+
+Scopes retain all the properties of the old `community_label`:
+
+- **Self-assigned** — no one approves your scope claims, no authority enforces them
+- **Not authoritative** — scopes carry no protocol-level privileges (cannot grant access, waive fees, or modify trust)
+- **Not unique** — multiple disjoint clusters can use the same scope
+- **Free-form strings** — all segments are arbitrary strings. Communities converge on naming through social consensus (e.g., "portland" not "pdx"), the same way they do today. No ISO codes, no standardized taxonomy, no gatekeeping.
+- **Used by services** — [MHR-Name](../applications/naming) scopes names by geographic scope, [MHR-Pub](../services/mhr-pub) supports `Scope(match)` subscriptions, [MHR-DHT](../services/mhr-dht#neighborhood-scoped-dht) uses scopes for content propagation boundaries, and the [Social](../applications/social) layer uses scopes for geographic and interest feeds
+
+### Geographic Scope Verification
+
+Geographic scopes can be **verified** through bottom-up aggregation — see [Identity Claims](../applications/identity) for the full verification protocol. In summary:
+
+- **Neighborhood level**: Verified by [RadioRangeProof](../applications/identity#radiorangeproof) — if you can hear a node's LoRa beacon, you're within physical range (~1–15 km)
+- **City level**: Verified by aggregating multiple verified neighborhood claims within the city
+- **Region/Country level**: Verified by aggregating verified city claims within the region
+
+Interest scopes are **never verified** — anyone can declare interest in Pokemon. Verification only matters for geographic claims because they're prerequisites for geographic voting and local governance (see [Voting](../applications/voting)).
+
+### Wire Format
+
+Designed for constrained devices:
+
+| Field | Size | Description |
+|-------|------|-------------|
+| `scope_type` | 1 byte | 0 = Geo, 1 = Topic |
+| `segment_count` | 1 byte | Number of path segments (max 8) |
+| `segments` | variable | Length-prefixed UTF-8 (1-byte length + content per segment) |
+
+Maximum size per scope: 2 + 8 × 33 = 266 bytes. A node with 8 scopes uses at most ~2.1 KB for scope data.
+
+### Backward Compatibility
+
+The `community_label` field is retained for backward compatibility. New nodes populate both:
+
+```
+Migration:
+  community_label: "portland-mesh"
+    → scopes: [Geo("portland")]
+
+  Old nodes: read community_label, ignore scopes
+  New nodes: read scopes, fall back to community_label if scopes is empty
+```
+
+### Geographic vs. Interest: Two Dimensions of Community
+
+| | Geographic Scopes | Interest Scopes |
+|---|---|---|
+| **Density** | Dense — most people are somewhere | Sparse — niche interests span the globe |
+| **Propagation** | Bottom-up through physical proximity | Wide, across geography |
+| **Verification** | RadioRangeProof + peer vouches | None needed (self-declared) |
+| **Content cost** | Cheap locally, expensive globally | Depends on relay distance |
+| **Voting** | Enables geographic voting | No voting implications |
+| **Examples** | `Geo("north-america", "us", "oregon", "portland")` | `Topic("gaming", "pokemon")` |
+
+A single post can have **both** a geographic and interest scope. A post tagged `Geo("portland") + Topic("gaming", "pokemon")` appears in both the Portland local feed and the global Pokemon feed. Intersection queries ("Portland Pokemon") are resolved client-side by filtering on both scopes.
 
 ## Comparison: Zones vs. Trust Neighborhoods
 
@@ -141,7 +233,7 @@ Community labels enable human-readable naming and discovery without any of the g
 | Governance | Admin keys, voting | None needed |
 | Boundaries | Hard, declared | Soft, overlapping |
 | Free communication | Within zone boundary | Between any trusted peers |
-| Naming | `alice@zone-name` | `alice@community-label` |
+| Naming | `alice@zone-name` | `alice@geo:portland` (hierarchical scopes) |
 | Sybil resistance | Admission policy | Trust is social and economic (you absorb their debts) |
 | UX complexity | Create, join, configure | Add contacts |
 

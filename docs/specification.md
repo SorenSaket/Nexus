@@ -46,6 +46,15 @@ This page is the normative reference for the Mehr protocol. Individual documenta
 | Presence beacon size | 20 bytes | [Discovery](marketplace/discovery#presence-beacons) |
 | Presence beacon interval | 10 seconds | [Discovery](marketplace/discovery#presence-beacons) |
 | Transitive credit limit | 10% per hop, max 2 hops | [Trust & Neighborhoods](economics/trust-neighborhoods#trust-based-credit) |
+| Max scopes per node | 8 | [Trust & Neighborhoods](economics/trust-neighborhoods#hierarchical-scopes) |
+| Max scope depth | 8 segments | [Trust & Neighborhoods](economics/trust-neighborhoods#wire-format) |
+| Max scope segment length | 32 characters | [Trust & Neighborhoods](economics/trust-neighborhoods#wire-format) |
+| Vouch expiry (default) | 30 epochs | [Identity & Claims](applications/identity#vouch-properties) |
+| Kickback rate range | 0–255 (u8) | [MHR-Store](services/mhr-store#kickback-rate) |
+| Default kickback rate | 128 (~50%) | [Content Propagation](economics/propagation#protocol-constants) |
+| IdentityClaim min size | ~100 bytes | [Identity & Claims](applications/identity#wire-format) |
+| Vouch size | 113 bytes | [Identity & Claims](applications/identity#vouch-wire-format) |
+| Geo verification: min vouches | 3 (for Verified level) | [Voting](applications/voting#geoverificationlevel) |
 
 ## Cryptographic Primitives
 
@@ -63,7 +72,7 @@ This page is the normative reference for the Mehr protocol. Individual documenta
 
 ```
 Layer 6: Applications
-  ├── Messaging, Social, Voice, Naming, Forums, Hosting
+  ├── Messaging, Social, Identity, Voice, Naming, Voting, Forums, Hosting
   └── depends on ↓
 
 Layer 5: Service Primitives
@@ -75,7 +84,7 @@ Layer 4: Capability Marketplace
   └── depends on ↓
 
 Layer 3: Economic Protocol
-  ├── MHR Token, Stochastic Rewards, CRDT Ledger, Trust Neighborhoods
+  ├── MHR Token, Stochastic Rewards, CRDT Ledger, Trust Neighborhoods, Propagation
   └── depends on ↓
 
 Layer 2: Security

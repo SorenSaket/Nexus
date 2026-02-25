@@ -80,6 +80,11 @@ StorageAgreement {
     duration_epochs: u32,           // how long
     challenge_interval: u32,        // how often to verify (in gossip rounds)
     erasure_role: Option<ShardInfo>,// if part of an erasure-coded set
+
+    // Revenue sharing — for content that earns from reader access
+    kickback_recipient: Option<NodeID>,  // original author (receives share of retrieval fees)
+    kickback_rate: u8,                   // 0-255: author's share of retrieval fee (rate/255)
+
     signatures: (Sig_Provider, Sig_Consumer),
 }
 ```
@@ -109,6 +114,60 @@ Storage decision:
 ```
 
 A trust neighborhood where members store each other's data operates with zero economic overhead — no tokens, no agreements, no challenges. This is how a community mesh handles local content naturally.
+
+## Revenue Sharing (Kickback)
+
+When content is published for public consumption (social posts, media, curated feeds), the **original author** can earn a share of retrieval fees through the kickback mechanism.
+
+### How It Works
+
+```
+Author publishes post → creates StorageAgreement with kickback fields:
+    kickback_recipient = Author's NodeID
+    kickback_rate = 128  (roughly 50% of retrieval fees go to author)
+
+Reader pays storage node to retrieve post:
+    Retrieval fee: 100 μMHR
+    Storage node keeps: 100 × (255 - 128) / 255 ≈ 50 μMHR
+    Storage node forwards: 100 × 128 / 255 ≈ 50 μMHR → Author
+
+Settlement: via the existing payment channel between storage node and author
+```
+
+### Incentive Alignment
+
+- **Storage nodes** are incentivized to host popular content because they earn the non-kickback portion of every retrieval fee
+- **Authors** are incentivized to create content people want to read because they earn kickback from every reader
+- **Readers** pay the same retrieval fee regardless — the kickback split is between author and storage node
+- **Curators** who reference posts in [curated feeds](../applications/social#5-curated-feed) drive traffic to original authors, earning kickback on their own curation feed while generating kickback for the original authors too
+
+### Kickback Rate
+
+The `kickback_rate` field is a `u8` (0–255):
+
+| Rate | Author Share | Storage Node Share | Typical Use |
+|------|-------------|-------------------|-------------|
+| 0 | 0% | 100% | No kickback (pure storage) |
+| 64 | ~25% | ~75% | Low author share, high storage incentive |
+| 128 | ~50% | ~50% | Balanced split |
+| 192 | ~75% | ~25% | High author share |
+| 255 | 100% | 0% | Maximum author share (storage node earns only per-epoch fee) |
+
+If `kickback_recipient` is `None`, there is no kickback — the storage node keeps all retrieval fees. This is the default for non-social content (private data, infrastructure objects, etc.).
+
+### Self-Funding Content
+
+When kickback revenue exceeds storage cost, content becomes **self-funding**. The author can reinvest kickback to extend storage agreements, or an automated [RepairAgent](#automated-repair) can do it:
+
+```
+Self-funding threshold:
+    If kickback_per_epoch > cost_per_epoch:
+        Content is self-sustaining — it lives as long as people read it
+    If kickback_per_epoch < cost_per_epoch:
+        Author must subsidize — content expires if author stops paying
+```
+
+Popular content that crosses the self-funding threshold climbs the [propagation hierarchy](../economics/propagation) automatically. Unpopular content stays local or expires. No algorithm decides what lives and what dies — economics does.
 
 ## Proof of Storage
 
