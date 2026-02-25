@@ -1,41 +1,80 @@
-# Website
+# Mehr Network
 
-This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
+**A Decentralized Capability Marketplace Over Transport-Agnostic Mesh**
 
-## Installation
+Mehr is a decentralized network where every resource — bandwidth, compute, storage, connectivity — is a discoverable, negotiable, verifiable, payable capability. Nodes participate at whatever level their hardware allows. Nothing is required except a cryptographic keypair.
+
+> *Mehr* (مهر) — Persian for bond, covenant, and sun. In Zoroastrian tradition, the deity of contracts and mutual obligation.
+
+## Why Mehr?
+
+- **A village with no ISP** can still communicate internally over LoRa radio
+- **A country under internet shutdown** can maintain mesh connectivity between citizens
+- **A community** can run its own local network and bridge to the wider internet through any available uplink
+- **Every device** — from a $30 solar-powered relay to a GPU workstation — contributes what it can and pays for what it needs
+
+## Core Principles
+
+| Principle | Description |
+|-----------|-------------|
+| **Transport Agnostic** | Any medium that can move bytes is a valid link — 500 bps radio to 10 Gbps fiber |
+| **Capability Agnostic** | Nodes advertise what they can do; hardware determines capability, the market determines role |
+| **Partition Tolerant** | Network fragmentation is expected operation, not an error state |
+| **Anonymous by Default** | Packets carry no source address; identity is a cryptographic keypair |
+| **Free Local, Paid Routed** | Direct neighbors communicate for free; you pay only when packets traverse others' infrastructure |
+
+## Protocol Stack
+
+| Layer | Name | Purpose |
+|-------|------|---------|
+| 0 | Physical Transport | Wraps LoRa, WiFi, BLE, cellular, TCP/IP behind a uniform interface |
+| 1 | Network Protocol | Identity, addressing, routing, and gossip |
+| 2 | Security | Encryption, authentication, and privacy |
+| 3 | Economic Protocol | MHR token, stochastic relay rewards, CRDT ledger, trust neighborhoods |
+| 4 | Capability Marketplace | Discovery, agreements, and verification |
+| 5 | Service Primitives | MHR-Store, MHR-DHT, MHR-Pub, MHR-Compute |
+| 6 | Applications | Messaging, social, voice, naming, forums, hosting |
+
+## Documentation
+
+The full specification is available at **[mehr.network](https://mehr.network)**.
+
+### Local Development
 
 ```bash
-yarn
+npm install
+npm start        # dev server at localhost:3000
+npm run build    # production build
 ```
 
-## Local Development
+### Generate PDF
 
 ```bash
-yarn start
+npm run generate-pdf    # outputs static/mehr-protocol-spec-v1.0.pdf
 ```
 
-This command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
+Requires Chromium (via Puppeteer). On CI without Chrome (e.g., Vercel), the build skips PDF generation and serves the pre-committed PDF.
 
-## Build
+## Project Structure
 
-```bash
-yarn build
+```
+docs/
+├── protocol/          Transport, network protocol, security
+├── economics/         MHR token, payment channels, CRDT ledger, trust
+├── marketplace/       Discovery, agreements, verification
+├── services/          MHR-Store, MHR-DHT, MHR-Pub, MHR-Compute
+├── applications/      Messaging, social, voice, naming, forums, hosting
+├── hardware/          Reference designs, device tiers
+├── development/       Roadmap, design decisions, resolved questions
+├── introduction.md    Protocol overview
+├── faq.md             Frequently asked questions
+└── specification.md   Full spec summary with download button
 ```
 
-This command generates static content into the `build` directory and can be served using any static contents hosting service.
+## Status
 
-## Deployment
+**v1.0 — Design Complete, Pre-Implementation.** All architectural and implementation-level questions have been resolved across five rounds of spec review. The protocol is ready for Phase 1 implementation.
 
-Using SSH:
+## License
 
-```bash
-USE_SSH=true yarn deploy
-```
-
-Not using SSH:
-
-```bash
-GIT_USER=<Your GitHub username> yarn deploy
-```
-
-If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
+Copyright Mehr Network Contributors.
