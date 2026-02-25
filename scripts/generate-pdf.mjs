@@ -247,6 +247,12 @@ function generateTOC(sections) {
 }
 
 async function main() {
+  // Skip PDF generation in CI/Vercel — Chrome/Puppeteer isn't available
+  if (process.env.CI || process.env.VERCEL) {
+    console.log('PDF generation skipped (CI environment). Using existing PDF in static/.\n');
+    return;
+  }
+
   console.log('Generating Mehr Protocol specification PDF...\n');
 
   // Read all docs
