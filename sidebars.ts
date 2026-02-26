@@ -84,6 +84,7 @@ const sidebars: SidebarsConfig = {
       collapsed: true,
       items: [
         'development/roadmap',
+        'development/landscape',
         'development/design-decisions',
         'development/versioning',
         'development/open-questions',
