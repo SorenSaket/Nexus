@@ -123,19 +123,41 @@ Delegation flow:
 
 This is transparent to the original requester — they don't need to know whether their contract ran locally or was delegated.
 
-## Heavy Compute as Capabilities
+## Opaque Compute: Hardware-Accelerated Services
 
-ML inference, transcription, translation, text-to-speech, and any other heavy computation are **not protocol primitives**. They are compute capabilities offered by nodes that have the hardware:
+ML inference, transcription, translation, text-to-speech, and any other heavy computation are **not protocol primitives**. They are compute capabilities offered by nodes that have the hardware. The pattern is **opaque compute**: input goes in, output comes out. The protocol does not sandbox, inspect, or guarantee the compute method — the node can use GPU, NPU, FPGA, or any hardware.
 
 ```
-A GPU node advertises:
+A GPU/NPU node advertises:
   offered_functions: [
     { function_id: hash("whisper-small"), cost: 50 μMHR/minute },
     { function_id: hash("piper-tts"), cost: 30 μMHR/minute },
   ]
 ```
 
-A consumer requests execution of that function through the standard compute delegation path. The protocol is **agnostic to what the function does** — it only cares about discovery, negotiation, execution, verification, and payment.
+A consumer requests execution of that function through the standard compute delegation path. The protocol is **agnostic to what the function does** — it only cares about discovery, negotiation, execution, verification, and payment. Trust comes from reputation, not verification of the compute method.
+
+**Hardware examples:**
+
+| Accelerator Type | Examples |
+|-----------------|----------|
+| **GPU** | NVIDIA RTX series, AMD Radeon |
+| **NPU** | Apple Neural Engine, Qualcomm Hexagon, MediaTek APU |
+| **FPGA** | Xilinx, Intel/Altera |
+| **TPU** | Google Edge TPU |
+
+### Result Verification for Opaque Compute
+
+Since opaque compute provides no built-in execution guarantee, consumers choose a verification strategy based on their trust requirements and budget:
+
+| Strategy | How It Works | Cost | Trust Level |
+|----------|-------------|------|-------------|
+| **1. Reputation (default)** | Node builds reputation through consistent outputs. Bad outputs → trust removal → lost income stream. | None (built into trust system) | Moderate |
+| **2. Redundant execution** | Client sends same input to 2–3 nodes. Majority agreement = accepted result. | 2–3x compute fees | High |
+| **3. Spot-checking** | Client occasionally sends inputs with known outputs. Wrong answer → node flagged, agreement terminated. | ~5% overhead | Moderate–High |
+| **4. Cryptographic verification (future)** | ZK proofs of correct inference (active research area). Not practical for large models today. | TBD | Highest |
+
+Verification is a **consumer-side choice**, not protocol enforcement. Most consumers rely on reputation (the default). High-value or adversarial workloads use redundant execution or spot-checking.
 
 ## Contract Use Cases
 

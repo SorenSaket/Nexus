@@ -64,9 +64,10 @@ What each tier naturally earns from:
 - Full compute services
 - Value: high-bandwidth links between mesh segments
 
-### Inference (GPU Workstation)
+### Inference (GPU/NPU Workstation)
 - ML inference fees (highest per-invocation revenue)
 - Heavy compute services
+- Includes: GPU workstations, servers with NPU/TPU, FPGA accelerators
 - Value: provides advanced capabilities to the entire mesh
 
 ## Delegation Patterns
@@ -80,7 +81,7 @@ Community bridge
   → delegates bulk storage and internet to →
 Gateway node
   → delegates heavy compute to →
-Inference node
+Inference node (GPU/NPU)
 ```
 
 Each delegation is a bilateral [capability agreement](../marketplace/agreements) with payment flowing through [channels](../economics/payment-channels).

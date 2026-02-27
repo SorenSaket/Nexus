@@ -157,7 +157,7 @@ This page documents the key architectural decisions made during Mehr protocol de
 |---|---|
 | **Chosen** | STT/TTS/inference as compute capabilities in the marketplace |
 | **Alternatives** | Dedicated transform layer |
-| **Rationale** | Speech-to-text, translation, and other transforms are just compute. Making them protocol primitives over-engineers the foundation. The capability marketplace already handles discovery, negotiation, execution, verification, and payment for arbitrary compute functions. |
+| **Rationale** | Speech-to-text, translation, and other transforms are just compute. Making them protocol primitives over-engineers the foundation. The capability marketplace already handles discovery, negotiation, execution, verification, and payment for arbitrary compute functions. Compute execution is opaque — the protocol does not verify the compute method, only the input/output. Verification strategies (reputation, redundant execution, spot-checking) are consumer-side choices, not protocol enforcement. |
 
 ## Group Admin: Delegated Co-Admin (No Threshold Signatures)
 
@@ -270,3 +270,27 @@ This page documents the key architectural decisions made during Mehr protocol de
 | **Chosen** | `effective_minting = min(emission_schedule, 0.5 × total_channel_debits)` |
 | **Alternatives** | Uncapped emission (vulnerable to self-dealing), fixed low emission (doesn't scale with network growth), proof-of-stake gating (concentrates power) |
 | **Rationale** | The revenue cap guarantees that self-dealing is unprofitable at all traffic levels: an attacker spending Y MHR on relay fees can receive at most 0.5 × Y in minting rewards, regardless of their share of the network. This holds for any Y, any epoch, and any number of Sybil nodes. The cap also makes supply growth demand-responsive: during low-usage periods, actual minting is well below the emission schedule (supply grows slowly, preventing speculation). As the network matures and relay fees increase, the cap becomes non-binding and supply follows the standard halving schedule. Fixed low emission was rejected because it doesn't scale — a fixed amount becomes either too generous at low traffic or too stingy at high traffic. Proof-of-stake gating was rejected because it concentrates minting power among large holders. |
+
+## Configurable Transitive Credit Ratio
+
+| | |
+|---|---|
+| **Chosen** | User-configurable transitive credit ratio (0–50%, default 10%) |
+| **Alternatives** | Fixed protocol constant (10%), fully uncapped user choice |
+| **Rationale** | Direct credit is already configurable per-peer; transitive ratio should be too. The 50% ceiling prevents naive users from excessive exposure to friend-of-friend defaults. Different communities have different risk appetites — a tight-knit village may want 30% transitive credit, while an urban mesh with loose trust edges may prefer 5%. Per-peer overrides (`transitive_ratio_overrides`) allow fine-grained control. A fixed 10% was too rigid; fully uncapped allows users to set 100%, which could cascade defaults through the trust graph. |
+
+## Single Geo Scope Per Node/Content
+
+| | |
+|---|---|
+| **Chosen** | Max 1 Geo scope + up to 3 Topic scopes per node/content; total scope data ≤ 1 KB |
+| **Alternatives** | Unconstrained (up to 8 of either type), total byte budget only (no count limit), no geo scopes on content |
+| **Rationale** | Physical presence is singular — you are in one place at a time. Voting is geo-scoped, and multiple geo scopes would enable double-voting on governance issues. RadioRangeProof verifies one location; multiple geo claims would require multiple independent proofs. Interests are multi-dimensional but hierarchical prefix matching means a single deep tag (e.g., `Topic("gaming", "pokemon", "competitive")`) covers multiple query levels — 3 topic slots is expressive enough for most users. The 1 KB byte cap (down from ~2.1 KB for 8 scopes) halves the scope footprint in announces and envelopes, meaningful for ESP32 and LoRa. A pure byte budget (no count limit) was rejected because it creates a perverse incentive: deep, specific tags cost more bytes, penalizing the most useful scopes. A hard count + byte cap gives predictable allocation for constrained devices while letting the UI show "bytes remaining" (like character counts). |
+
+## Per-Hop Independent Relay Rewards
+
+| | |
+|---|---|
+| **Chosen** | Per-hop independent rewards (VRF lottery per relay, no end-to-end coordination) |
+| **Alternatives** | End-to-end payment (sender pays all relays in one transaction), hybrid (per-hop with end-to-end settlement) |
+| **Rationale** | End-to-end payment requires the sender to know the full path, which breaks sender anonymity — packets carry no source address by design. Per-hop stochastic rewards already achieve ~0.3% bandwidth overhead; end-to-end would save negligible additional bandwidth. Per-hop uses simple bilateral channels; end-to-end requires multi-hop payment routing (Lightning-style complexity). Each hop is independent — no coordination failure cascade. If one relay goes offline, only that hop is affected; upstream and downstream relays continue operating on their own bilateral channels. The hybrid approach adds complexity without meaningful benefit over pure per-hop. |

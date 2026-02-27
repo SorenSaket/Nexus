@@ -22,8 +22,12 @@ TrustConfig {
     // Per-peer cost overrides (discount for friends-of-friends, etc.)
     cost_overrides: Map<NodeID, u64>,
 
+    // Transitive credit ratio for friends-of-friends (default 0.10)
+    transitive_credit_ratio: f32,           // range [0.0, 0.50], default 0.10
+    transitive_ratio_overrides: Map<NodeID, f32>,  // per-peer override
+
     // Self-assigned scopes — geographic and interest (purely informational)
-    scopes: Vec<HierarchicalScope>,     // max 8 per node
+    scopes: Vec<HierarchicalScope>,     // max 1 Geo + up to 3 Topic; total ≤ 1 KB
 
     // DEPRECATED: use scopes instead. Kept for backward compatibility.
     community_label: Option<String>,    // e.g., "portland-mesh"
@@ -81,7 +85,7 @@ When a node needs MHR (e.g., to reach beyond its trusted neighborhood), its trus
 ```
 Transitive credit:
   Direct trust:           full credit line (set by trusting peer)
-  Friend-of-friend (2 hops): 10% of direct credit line
+  Friend-of-friend (2 hops): configurable ratio of direct credit line (default 10%, max 50%)
   3+ hops of trust:        no credit (too diluted)
 
   If a credited node defaults, the vouching peer absorbs the debt.
@@ -94,7 +98,7 @@ The credit line is **rate-limited** for safety:
 | Trust Distance | Max Credit | Rate Limit |
 |---------------|-----------|-----------|
 | Direct trusted peer | Configurable by trusting node | Per-epoch (configurable) |
-| Friend-of-friend | 10% of direct limit | Per-epoch, per friend-of-friend |
+| Friend-of-friend | Configurable % of direct limit (default 10%, max 50%) | Per-epoch, per friend-of-friend |
 | Beyond 2 hops | None | N/A |
 
 ```
@@ -111,7 +115,7 @@ Credit accounting:
 
   Rules:
     - Direct peers: each gets a separate credit_limit (set in TrustConfig)
-    - Friend-of-friend: each gets 10% of the vouching peer's direct limit,
+    - Friend-of-friend: each gets transitive_credit_ratio × vouching peer's direct limit,
       tracked independently per grantee
     - granted_this_epoch resets to 0 at each epoch boundary
     - Outstanding credit that exceeds limit: no new grants until repaid
@@ -131,6 +135,20 @@ HierarchicalScope {
     },
     segments: Vec<String>,    // hierarchical path, max 8 levels, max 32 chars each
 }
+
+Scope constraints:
+  Per node (TrustConfig):    max 1 Geo + up to 3 Topic (4 total)
+  Per content (PostEnvelope): max 1 Geo + up to 3 Topic (4 total)
+  Total scope bytes:          ≤ 1,024 bytes (UI shows remaining space)
+
+Rationale:
+  - You are physically in one place at a time
+  - Voting is geo-scoped — multiple geo scopes would enable double-voting
+  - RadioRangeProof verifies one location
+  - Interests are multi-dimensional — multiple topics are natural
+  - Hierarchical prefix matching means a single deep tag covers multiple query levels
+  - 3 topics is expressive enough: most users have 1-2 primary interests
+  - 1 KB cap keeps scope data small for constrained devices (ESP32)
 ```
 
 Scopes are **hierarchical namespaces**, similar to URLs. The `segments` are arbitrary strings — they can describe physical locations, virtual spaces, organizations, or anything else. The `scope_type` signals **propagation intent**, not physicality: `Geo` means "this is a place where members are dense and nearby each other" (whether physically or virtually), while `Topic` means "this is an interest that spans across places."
@@ -226,7 +244,7 @@ Designed for constrained devices:
 | `segment_count` | 1 byte | Number of path segments (max 8) |
 | `segments` | variable | Length-prefixed UTF-8 (1-byte length + content per segment) |
 
-Maximum size per scope: 2 + 8 × 33 = 266 bytes. A node with 8 scopes uses at most ~2.1 KB for scope data.
+Maximum size per scope: 2 + 8 × 33 = 266 bytes. Total scope data is capped at **1,024 bytes** (1 KB). With max 4 scopes (1 Geo + 3 Topic), typical usage is well under the cap — e.g., `Geo("us", "oregon", "portland")` (15 bytes) + `Topic("gaming", "pokemon")` (18 bytes) + `Topic("music", "jazz")` (16 bytes) = 49 bytes. The cap only binds when using deep hierarchies (8 segments × 32 chars) across multiple scopes.
 
 ### Backward Compatibility
 
@@ -252,8 +270,9 @@ Migration:
 | **Voting** | Enables scoped voting (if verified) | No voting implications |
 | **Physical examples** | `Geo("north-america", "us", "oregon", "portland")` | `Topic("gaming", "pokemon")` |
 | **Virtual examples** | `Geo("cyberspace", "guild-wars", "server-42")` | `Topic("science", "physics")` |
+| **Multiplicity** | One per node/content | Up to 3 (within 1 KB total) |
 
-A single post can have **both** a geographic and interest scope. A post tagged `Geo("portland") + Topic("gaming", "pokemon")` appears in both the Portland local feed and the global Pokemon feed. Intersection queries ("Portland Pokemon") are resolved client-side by filtering on both scopes.
+A single post can have **one** geographic scope and **multiple** interest scopes. A post tagged `Geo("portland") + Topic("gaming", "pokemon")` appears in both the Portland local feed and the global Pokemon feed. Intersection queries ("Portland Pokemon") are resolved client-side by filtering on both scopes.
 
 ## Comparison: Explicit Zones vs. Trust Neighborhoods
 
@@ -273,7 +292,7 @@ A single post can have **both** a geographic and interest scope. A post tagged `
 The trust graph provides natural Sybil resistance:
 
 1. **Trust has economic cost**: Vouching for a node means absorbing its potential debts. Sybil identities with no real relationships get no credit.
-2. **Rate limiting**: Even if a malicious node gains one trust relationship, transitive credit is capped at 10% per hop.
+2. **Rate limiting**: Even if a malicious node gains one trust relationship, transitive credit is capped by configurable ratio (default 10%, max 50%) per hop.
 3. **Reputation**: A node's usefulness as a relay/service provider is what earns trust over time. Creating many identities dilutes reputation rather than concentrating it.
 4. **Local detection**: A node's trust graph is visible to its peers. A node trusting an unusual number of new, unproven identities is itself suspicious.
 

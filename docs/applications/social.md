@@ -60,7 +60,7 @@ PostEnvelope {
     headline: Option<String>,               // title (~100 chars, author-set)
     summary: Option<String>,                // author-written preview (None for boosts — use the original's)
     media_hints: Vec<MediaHint>,            // lightweight descriptions of attachments
-    scopes: Vec<HierarchicalScope>,         // geographic + interest tags
+    scopes: Vec<HierarchicalScope>,         // max 1 Geo + up to 3 Topic; total ≤ 1 KB
     reply_to: Option<Blake3Hash>,           // post_id of parent (threading)
     boost_of: Option<Blake3Hash>,           // post_id of boosted post
     references: Vec<Blake3Hash>,            // post_ids of related posts (bidirectional content graph)
@@ -570,7 +570,7 @@ PostEnvelope {
 }
 ```
 
-Envelope appears in both Portland geographic feeds and Pokemon interest feeds. Portland Pokemon intersection subscribers see it automatically.
+Envelope appears in both Portland geographic feeds and Pokemon interest feeds. Portland Pokemon intersection subscribers see it automatically. Note: up to 3 Topic scopes are allowed (e.g., `Topic("gaming", "pokemon") + Topic("events", "meetups")`), but only 1 Geo scope per post, with total scope data capped at 1 KB — see [scope constraints](../economics/trust-neighborhoods#hierarchical-scopes).
 
 ### Neighborhood-Only Post (Private)
 
