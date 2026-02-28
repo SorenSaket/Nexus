@@ -196,7 +196,7 @@ Some things are deliberately out of scope:
 
 - **Cross-protocol atomic swaps.** Mehr's CRDT ledger has different finality guarantees than blockchains. Token exchange happens through gateway operators or bilateral agreement, not protocol-level swap primitives.
 - **Universal identity federation.** Mehr doesn't maintain a global directory mapping all identities across all protocols. Each bridge maintains its own attestation set. Users choose which bridges they trust.
-- **Protocol-level name resolution for external systems.** Mehr's [naming system](../applications/naming) resolves Mehr names. External names resolve through their own systems, with bridges translating at the boundary.
+- **Protocol-level name resolution for external systems.** Mehr's [naming system](../services/mhr-name) resolves Mehr names. External names resolve through their own systems, with bridges translating at the boundary.
 - **Backward compatibility shims.** Bridge operators handle version mismatches. The Mehr protocol doesn't adapt its wire format to accommodate external protocol changes.
 
 ## Building a Bridge

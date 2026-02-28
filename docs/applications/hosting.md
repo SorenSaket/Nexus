@@ -9,7 +9,7 @@ Traditional web hosting requires a server, a domain name, a certificate, and ong
 
 ## Hosting a Website
 
-A "website" on Mehr is a collection of [DataObjects](../services/mhr-store) — HTML, CSS, JavaScript, images — stored in MHR-Store and addressed by content hash or human-readable [MHR-Name](naming).
+A "website" on Mehr is a collection of [DataObjects](../services/mhr-store) — HTML, CSS, JavaScript, images — stored in MHR-Store and addressed by content hash or human-readable [MHR-Name](../services/mhr-name).
 
 ### Static Site
 

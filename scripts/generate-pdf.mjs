@@ -52,6 +52,8 @@ const SECTIONS = [
       'services/mhr-dht',
       'services/mhr-pub',
       'services/mhr-compute',
+      'services/mhr-name',
+      'services/mhr-id',
     ],
   },
   {
@@ -60,7 +62,6 @@ const SECTIONS = [
       'applications/messaging',
       'applications/social',
       'applications/voice',
-      'applications/naming',
       'applications/community-apps',
       'applications/hosting',
     ],

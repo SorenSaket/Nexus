@@ -1,9 +1,9 @@
 ---
-sidebar_position: 3
-title: Identity & Claims
+sidebar_position: 6
+title: "MHR-ID"
 ---
 
-# Identity & Claims
+# Identity & Claims (MHR-ID)
 
 Mehr identity is **self-certifying** — your public key is your identity, and no authority can revoke it. But identity is more than a key. People want to know: *Where are you? What do you care about? Are you the same person who used to have a different key?* Identity claims and vouches answer these questions through mesh-native peer attestation.
 
@@ -14,6 +14,7 @@ An **IdentityClaim** is a signed assertion by a node about itself:
 ```
 IdentityClaim {
     claimant: NodeID,
+    public_key: Ed25519PublicKey,   // enables self-verification without prior key exchange
     claim_type: enum {
         GeoPresence {
             scope: HierarchicalScope,       // "I am in Portland"
@@ -34,7 +35,7 @@ IdentityClaim {
             handle: String,                // username on that platform
         },
     },
-    evidence: Option<Evidence>,     // proof backing the claim
+    evidence: Option<Evidence>,     // proof backing the claim (embedded in claim_data)
     created: Timestamp,
     expires: Option<Timestamp>,     // None = no expiry (must be renewed by vouches)
     signature: Ed25519Sig,          // signed by claimant
@@ -60,14 +61,15 @@ IdentityClaim {
 | Field | Size | Description |
 |-------|------|-------------|
 | `claimant` | 16 bytes | Destination hash |
+| `public_key` | 32 bytes | Ed25519 verifying key (enables self-verification without prior key exchange) |
 | `claim_type` | 1 byte | 0=GeoPresence, 1=CommunityMember, 2=KeyRotation, 3=Capability, 4=ExternalIdentity |
-| `claim_data` | variable | Type-specific payload |
-| `evidence` | variable | Optional proof data (hash reference) |
+| `claim_data_len` | 2 bytes | Length of claim_data (u16 LE) |
+| `claim_data` | variable | Type-specific payload (includes evidence if applicable) |
 | `created` | 8 bytes | Unix timestamp |
-| `expires` | 9 bytes | 1 byte flag + 8 bytes timestamp (if present) |
+| `expires` | 1–9 bytes | 1 byte flag (0=no expiry, 1=has expiry) + 8 bytes timestamp if flag=1 |
 | `signature` | 64 bytes | Ed25519 signature |
 
-Minimum claim size: ~100 bytes. Fits comfortably in a single LoRa frame.
+Minimum claim size: 124 bytes (no data, no expiry). Fits comfortably in a single LoRa frame.
 
 ## Vouches
 
@@ -78,6 +80,7 @@ Vouch {
     voucher: NodeID,                // who is vouching
     claim_hash: Blake3Hash,         // Blake3 hash of the IdentityClaim being vouched for
     confidence: u8,                 // 0-255: how confident the voucher is
+    sequence: u64,                  // monotonic counter for superseding/revoking
     signature: Ed25519Sig,          // signed by voucher
 }
 ```
@@ -96,9 +99,10 @@ Vouch {
 | `voucher` | 16 bytes | Destination hash |
 | `claim_hash` | 32 bytes | Blake3 hash of the claim |
 | `confidence` | 1 byte | 0-255 |
+| `sequence` | 8 bytes | Monotonic counter (LE). Higher sequence supersedes older vouches for the same (voucher, claim_hash) pair. |
 | `signature` | 64 bytes | Ed25519 signature |
 
-Total: 113 bytes. Lightweight enough to gossip freely.
+Total: 121 bytes. Lightweight enough to gossip freely.
 
 ## Verification Methods
 
@@ -236,11 +240,11 @@ This means a node calculates the **effective verification level** of any claim b
 
 ### Storage and Propagation
 
-- Claims are stored as **immutable DataObjects** in [MHR-Store](../services/mhr-store)
+- Claims are stored as **immutable DataObjects** in [MHR-Store](mhr-store)
 - Geographic claims propagate within the claimed scope (a Portland claim gossips within Portland)
 - Interest claims propagate within the interest scope
 - Vouches propagate with the claims they reference
-- Both are lightweight enough for LoRa (~100–113 bytes)
+- Both are lightweight enough for LoRa (~121–124 bytes)
 
 ## Integration with Existing Systems
 
@@ -274,11 +278,11 @@ KeyRotation claims with only the old key's signature are treated with suspicion 
 
 ### Naming
 
-Geographic claims enable scoped naming: `alice@geo:portland` resolves only if Alice has a verified GeoPresence claim for Portland scope — see [Naming](naming).
+Geographic claims enable scoped naming: `alice@geo:portland` resolves only if Alice has a verified GeoPresence claim for Portland scope — see [MHR-Name](mhr-name).
 
 ### Voting
 
-Verified geographic claims are **prerequisites for geographic voting** — a node cannot vote on Portland issues without a verified Portland-area GeoPresence claim. See [Voting](voting) for the eligibility model.
+Verified geographic claims are **prerequisites for geographic voting** — a node cannot vote on Portland issues without a verified Portland-area GeoPresence claim. See [Voting](../applications/voting) for the eligibility model.
 
 ## Comparison with Other Identity Systems
 

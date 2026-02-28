@@ -73,7 +73,7 @@ Network fragmentation is not an error state — it is expected operation. A vill
 
 ### 4. Anonymous by Default
 
-Packets carry no source address. A relay node knows which neighbor handed it a packet, but not whether that neighbor originated it or is relaying it from someone else. Identity is a cryptographic keypair — not a name, not an IP address, not an account. [Human-readable names](applications/naming) are optional and self-assigned. You can use the network, earn MHR, host content, and communicate without ever revealing who you are.
+Packets carry no source address. A relay node knows which neighbor handed it a packet, but not whether that neighbor originated it or is relaying it from someone else. Identity is a cryptographic keypair — not a name, not an IP address, not an account. [Human-readable names](services/mhr-name) are optional and self-assigned. You can use the network, earn MHR, host content, and communicate without ever revealing who you are.
 
 ### 5. Free Local, Paid Routed
 

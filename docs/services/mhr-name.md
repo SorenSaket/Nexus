@@ -1,6 +1,6 @@
 ---
-sidebar_position: 4
-title: Naming
+sidebar_position: 5
+title: "MHR-Name"
 ---
 
 # Naming (MHR-Name)

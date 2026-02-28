@@ -219,15 +219,15 @@ Scopes retain all the properties of `community_label`:
 - **Not authoritative** — scopes carry no protocol-level privileges (cannot grant access, waive fees, or modify trust)
 - **Not unique** — multiple disjoint clusters can use the same scope
 - **Free-form strings** — all segments are arbitrary strings. Communities converge on naming through social consensus (e.g., "portland" not "pdx"), the same way they do today. No ISO codes, no standardized taxonomy, no gatekeeping.
-- **Used by services** — [MHR-Name](../applications/naming) scopes names by geographic scope, [MHR-Pub](../services/mhr-pub) supports `Scope(match)` subscriptions, [MHR-DHT](../services/mhr-dht#neighborhood-scoped-dht) uses scopes for content propagation boundaries, and the [Social](../applications/social) layer uses scopes for geographic and interest feeds
+- **Used by services** — [MHR-Name](../services/mhr-name) scopes names by geographic scope, [MHR-Pub](../services/mhr-pub) supports `Scope(match)` subscriptions, [MHR-DHT](../services/mhr-dht#neighborhood-scoped-dht) uses scopes for content propagation boundaries, and the [Social](../applications/social) layer uses scopes for geographic and interest feeds
 
 ### Geo Scope Verification
 
-Geo scopes can optionally be **verified** — see [Identity Claims](../applications/identity) for the full verification protocol. Verification methods vary by the kind of place:
+Geo scopes can optionally be **verified** — see [MHR-ID](../services/mhr-id) for the full verification protocol. Verification methods vary by the kind of place:
 
 | Place Type | Verification Method | Precision |
 |-----------|-------------------|-----------|
-| **Physical neighborhood** | [RadioRangeProof](../applications/identity#radiorangeproof) — if you can hear a node's LoRa beacon, you're within physical range | ~1–15 km |
+| **Physical neighborhood** | [RadioRangeProof](../services/mhr-id#radiorangeproof) — if you can hear a node's LoRa beacon, you're within physical range | ~1–15 km |
 | **Physical city/region** | Bottom-up aggregation of verified neighborhood claims | Aggregated |
 | **Virtual space** | Application-specific (e.g., server-signed attestation, invite-chain, admin vouch) | Varies |
 | **Organization** | Peer attestation from existing verified members | Social |

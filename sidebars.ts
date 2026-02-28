@@ -49,6 +49,8 @@ const sidebars: SidebarsConfig = {
         'services/mhr-dht',
         'services/mhr-pub',
         'services/mhr-compute',
+        'services/mhr-name',
+        'services/mhr-id',
       ],
     },
     {
@@ -58,9 +60,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'applications/messaging',
         'applications/social',
-        'applications/identity',
         'applications/voice',
-        'applications/naming',
         'applications/community-apps',
         'applications/voting',
         'applications/licensing',

@@ -63,7 +63,7 @@ graph TD
 
 **Identity** is an Ed25519 keypair — the same key used for node identity. No separate "app accounts." A user's identity is portable across applications.
 
-**Discovery** uses [MHR-DHT](mhr-dht) for content-addressed lookups and [MHR-Name](../applications/naming) for human-readable resolution.
+**Discovery** uses [MHR-DHT](mhr-dht) for content-addressed lookups and [MHR-Name](mhr-name) for human-readable resolution.
 
 ## Comparison with Other Frameworks
 

@@ -49,11 +49,11 @@ This page is the normative reference for the Mehr protocol. Individual documenta
 | Max scopes per node | 8 | [Trust & Neighborhoods](economics/trust-neighborhoods#hierarchical-scopes) |
 | Max scope depth | 8 segments | [Trust & Neighborhoods](economics/trust-neighborhoods#wire-format) |
 | Max scope segment length | 32 characters | [Trust & Neighborhoods](economics/trust-neighborhoods#wire-format) |
-| Vouch expiry (default) | 30 epochs | [Identity & Claims](applications/identity#vouch-properties) |
+| Vouch expiry (default) | 30 epochs | [MHR-ID](services/mhr-id#vouch-properties) |
 | Kickback rate range | 0–255 (u8) | [MHR-Store](services/mhr-store#kickback-rate) |
 | Default kickback rate | 128 (~50%) | [Content Propagation](economics/propagation#protocol-constants) |
-| IdentityClaim min size | ~100 bytes | [Identity & Claims](applications/identity#wire-format) |
-| Vouch size | 113 bytes | [Identity & Claims](applications/identity#vouch-wire-format) |
+| IdentityClaim min size | 124 bytes | [MHR-ID](services/mhr-id#wire-format) |
+| Vouch size | 121 bytes | [MHR-ID](services/mhr-id#vouch-wire-format) |
 | Geo verification: min vouches | 3 (for Verified level) | [Voting](applications/voting#geoverificationlevel) |
 | Protocol version encoding | 1 byte (major 4 bits, minor 4 bits) | [Versioning](development/versioning#version-field) |
 | Extended version escape | Major = 15 → read u16 pair from TLV | [Versioning](development/versioning#version-field) |
@@ -80,8 +80,8 @@ This page is the normative reference for the Mehr protocol. Individual documenta
 
 ```mermaid
 graph TD
-    L6["Layer 6: Applications<br/>Messaging, Social, Identity, Voice, Naming, Voting, Licensing, Cloud Storage, Roaming, Forums, Hosting"] --> L5
-    L5["Layer 5: Service Primitives<br/>MHR-Store, MHR-DHT, MHR-Pub, MHR-Compute"] --> L4
+    L6["Layer 6: Applications<br/>Messaging, Social, Voice, Voting, Licensing, Cloud Storage, Roaming, Forums, Hosting"] --> L5
+    L5["Layer 5: Service Primitives<br/>MHR-Store, MHR-DHT, MHR-Pub, MHR-Compute, MHR-Name, MHR-ID"] --> L4
     L4["Layer 4: Capability Marketplace<br/>Discovery, Agreements, Verification"] --> L3
     L3["Layer 3: Economic Protocol<br/>MHR Token, Stochastic Rewards, CRDT Ledger, Trust Neighborhoods, Propagation"] --> L2
     L2["Layer 2: Security<br/>Link encryption, E2E encryption, Authentication, Key management"] --> L1
@@ -147,8 +147,8 @@ Total: 200 bytes
 | 3. Layer 2: Security | [Security](protocol/security) |
 | 4. Layer 3: Economic Protocol | [MHR Token](economics/mhr-token), [Stochastic Relay Rewards](economics/payment-channels), [CRDT Ledger](economics/crdt-ledger), [Trust & Neighborhoods](economics/trust-neighborhoods), [Content Propagation](economics/propagation), [Content Governance](economics/content-governance), [Real-World Economics](economics/real-world-impact) |
 | 5. Layer 4: Capability Marketplace | [Overview](marketplace/overview), [Discovery](marketplace/discovery), [Agreements](marketplace/agreements), [Verification](marketplace/verification) |
-| 6. Layer 5: Service Primitives | [MHR-Store](services/mhr-store), [MHR-DHT](services/mhr-dht), [MHR-Pub](services/mhr-pub), [MHR-Compute](services/mhr-compute) |
-| 7. Layer 6: Applications | [Messaging](applications/messaging), [Social](applications/social), [Identity](applications/identity), [Voice](applications/voice), [Naming](applications/naming), [Community Apps](applications/community-apps), [Voting](applications/voting), [Digital Licensing](applications/licensing), [Cloud Storage](applications/cloud-storage), [Roaming](applications/roaming), [Hosting](applications/hosting) |
+| 6. Layer 5: Service Primitives | [MHR-Store](services/mhr-store), [MHR-DHT](services/mhr-dht), [MHR-Pub](services/mhr-pub), [MHR-Compute](services/mhr-compute), [MHR-Name](services/mhr-name), [MHR-ID](services/mhr-id) |
+| 7. Layer 6: Applications | [Messaging](applications/messaging), [Social](applications/social), [Voice](applications/voice), [Community Apps](applications/community-apps), [Voting](applications/voting), [Digital Licensing](applications/licensing), [Cloud Storage](applications/cloud-storage), [Roaming](applications/roaming), [Hosting](applications/hosting) |
 | 8. Hardware Reference | [Reference Designs](hardware/reference-designs), [Device Tiers](hardware/device-tiers) |
 | 9. Implementation Roadmap | [Roadmap](development/roadmap) |
 | 10. Design Decisions | [Design Decisions](development/design-decisions) |

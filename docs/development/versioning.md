@@ -109,7 +109,7 @@ Crypto migration timeline:
     Duration: permanent.
 ```
 
-The [KeyRotation](../applications/identity) identity claim is designed specifically for this: a node signs a statement with its old key saying "my new key is X", then the network recognizes the new key. This works even if the old algorithm is weakened — as long as the rotation happens before the old key is compromised.
+The [KeyRotation](../services/mhr-id) identity claim is designed specifically for this: a node signs a statement with its old key saying "my new key is X", then the network recognizes the new key. This works even if the old algorithm is weakened — as long as the rotation happens before the old key is compromised.
 
 ## Transition Mechanics
 
