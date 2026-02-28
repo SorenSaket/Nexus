@@ -73,9 +73,9 @@ The anti-gaming defense is **not** service-specific proofs. It is three mechanis
 
 1. **Non-deterministic assignment** — the client cannot choose who serves the request
 2. **Net-income revenue cap** — total minting cannot exceed 50% of net economic activity
-3. **Service burn + active-set scaling** — 2% burn on all funded-channel payments + emission scaled by partition size bounds isolated partition damage to a finite equilibrium
+3. **Service burn + active-set scaling** — 2% burn on all funded-channel payments + emission scaled by partition size bounds isolated partition supply growth to at most `E_s` per epoch
 
-Together, these guarantee that self-dealing in a connected network is **never profitable**, and that isolated partitions converge to a bounded supply equilibrium. See the [Security Analysis](#security-analysis) for the complete threat model.
+Together, these guarantee that self-dealing in a connected network is **never profitable**, and that isolated partition minting is bounded by scaled emission per epoch (convergent over time due to halving). See the [Security Analysis](#security-analysis) for the complete threat model.
 
 ### Non-Deterministic Assignment
 
@@ -148,8 +148,8 @@ Minting formula (all services):
   Why active-set scaling:
     Without scaling, a 3-node partition mints the same as a 10,000-node network.
     With scaling, the 3-node partition mints 3% of full emission — proportional
-    to its size. Combined with the 2% burn, supply converges to a finite
-    equilibrium (scaled_emission / burn_rate) instead of growing without bound.
+    to its size. The 2% burn provides additional friction (~4% reduction in
+    attacker growth rate) and absorbs excess supply after partition merge.
 ```
 
 ### Service-Specific Payment Mechanics
@@ -210,7 +210,7 @@ Self-dealing with non-deterministic assignment + net-income cap:
 
 Non-deterministic assignment forces the attacker to pay honest nodes. The net-income cap ensures the attacker's internal transfers (paying their own nodes) produce zero minting eligibility. Together, self-dealing in a connected network always loses money — the attacker spends real MHR on honest nodes and earns nothing from their internal circulation.
 
-**Note**: This "never profitable" result requires that the network is connected and non-deterministic assignment is operational. In an [isolated partition](#attack-isolated-partition) where the attacker controls all nodes, non-deterministic assignment is nullified — but genesis-anchored minting (bootstrap), active-set-scaled emission, and 2% service burn bound the damage to a finite equilibrium. See the [Security Analysis](#security-analysis) for the full threat model.
+**Note**: This "never profitable" result requires that the network is connected and non-deterministic assignment is operational. In an [isolated partition](#attack-isolated-partition) where the attacker controls all nodes, non-deterministic assignment is nullified — but genesis-anchored minting (bootstrap), active-set-scaled emission, and 2% service burn bound supply growth to at most `E_s` per epoch (convergent over time due to halving). See the [Security Analysis](#security-analysis) for the full threat model.
 
 ### What We Don't Need
 
@@ -304,7 +304,7 @@ Why this works:
 
 ### Service Burn
 
-A **2% burn** is applied to every funded-channel payment, permanently destroying the burned amount. This creates a deflationary force that counterbalances minting, ensuring supply converges to a finite equilibrium even in isolated partitions.
+A **2% burn** is applied to every funded-channel payment, permanently destroying the burned amount. This creates a deflationary force that provides friction in isolated partitions and absorbs excess supply after partition merge.
 
 ```
 Service burn mechanics:
@@ -327,18 +327,13 @@ Service burn mechanics:
     Burns are reflected in the CRDT ledger as reduced delta_earned
     (provider's delta_earned increases by 98% of payment, not 100%)
 
-Equilibrium in isolated partitions:
-  In a partition with N nodes, active-set-scaled emission = (N/100) × E
-  Each epoch, the burn destroys 2% of circulating supply used in transactions
-  Supply converges to: equilibrium = scaled_emission / burn_rate
-
-  Example (3-node partition):
-    scaled_emission = 0.03 × E = 0.03 × 10^6 = 30,000 MHR/epoch
-    burn_rate = 0.02
-    equilibrium = 30,000 / 0.02 = 1,500,000 MHR
-
-  This is a FINITE bound, regardless of how long the partition persists.
-  Without burn + scaling: supply grows without bound at E per epoch.
+Burn role in isolated partitions:
+  In an isolated partition, the attacker spends the minimum needed to
+  saturate the minting cap (~2.04 × E_s per epoch). The burn on this
+  activity is ~0.04 × E_s per epoch — a ~4% reduction in the attacker's
+  supply growth rate (see Supply Dynamics Proof in Security Analysis).
+  After reconnection, the 2% burn on the entire network's economic
+  activity gradually absorbs the excess supply.
 
 Effect on connected networks:
   In the normal (connected) network, burns reduce effective circulating supply.
@@ -498,8 +493,8 @@ Revenue-capped minting formula:
   minting_cap = 0.5  (minting can never exceed 50% of net service activity)
 
   Service burn: 2% of every funded-channel payment permanently destroyed.
-  This reduces circulating supply and bounds isolated partition equilibrium
-  to scaled_emission / burn_rate (finite).
+  This reduces circulating supply and imposes friction on isolated partition
+  supply growth (~4% reduction in attacker growth rate per epoch).
 ```
 
 **Why net income, not gross debits:** Gross debits can be inflated by cycling — two colluding nodes pass the same MHR back and forth, each pass creating new "debits." Net income eliminates this: a round-trip produces income = spending → net = 0 → zero minting. See [Channel Cycling](#attack-channel-cycling) in the Security Analysis for the full defense.
@@ -549,7 +544,7 @@ Self-dealing attack analysis (with non-deterministic assignment):
   NEVER profitable — the attacker's own net income is always 0.
 ```
 
-**Important**: The "never profitable" result applies to the **connected** network case where non-deterministic assignment routes most demand to honest nodes. In an [isolated partition](#attack-isolated-partition) where the attacker controls all nodes, non-deterministic assignment is nullified — but genesis attestation (bootstrap), active-set scaling, and service burn bound the damage to a finite equilibrium.
+**Important**: The "never profitable" result applies to the **connected** network case where non-deterministic assignment routes most demand to honest nodes. In an [isolated partition](#attack-isolated-partition) where the attacker controls all nodes, non-deterministic assignment is nullified — but genesis attestation (bootstrap), active-set scaling, and service burn bound supply growth to at most `E_s` per epoch (convergent over time due to halving).
 
 **What happens to "unminted" emission:**
 
@@ -970,51 +965,76 @@ This is the most significant economic attack vector. Three defense layers bound 
 
 2. **Active-set-scaled emission (size defense)**: Emission is scaled by the partition's active set size: `scaled_emission = emission × min(active_nodes, 100) / 100`. A 3-node partition gets 3% of full emission. This eliminates the linear scaling advantage of small partitions.
 
-3. **Service burn (equilibrium defense)**: 2% of every funded-channel payment is permanently destroyed. In an isolated partition, supply converges to a finite equilibrium where burn = minting:
-
-```
-Isolated partition equilibrium analysis:
-
-  Setup: attacker controls 100% of an isolated partition with N nodes
-  Scaled emission: (N/100) × E  (for N < 100)
-  Burn rate: 2% of every funded-channel payment
-
-  Without burn (compounding):
-    Supply after K epochs: M × 1.5^K (unbounded growth)
-    Reaches scaled emission ceiling in O(log(scaled_E/M)) epochs
-    After ceiling: attacker mints scaled_E per epoch indefinitely
-
-  With burn (equilibrium):
-    Each epoch: supply += minting, supply -= burns
-    Burns = 0.02 × economic_activity
-    At equilibrium: minting = burns
-    equilibrium_supply = scaled_emission / burn_rate
-
-  Example (3-node partition, bootstrap emission):
-    scaled_emission = (3/100) × 10^6 = 30,000 MHR/epoch
-    equilibrium = 30,000 / 0.02 = 1,500,000 MHR
-    → Finite bound, regardless of how long the partition persists
-
-  Example (3-node partition, mature emission after 5 halvings):
-    scaled_emission = (3/100) × 10^6 / 32 = 937.5 MHR/epoch
-    equilibrium = 937.5 / 0.02 = 46,875 MHR
-    → Negligible
-
-  Compare to undefended (no scaling, no burn):
-    Full emission at bootstrap: 10^6 MHR/epoch, growing without bound
-    After 100 epochs: 10^8 excess MHR
-```
+3. **Service burn (friction defense)**: 2% of every funded-channel payment is permanently destroyed. This imposes ongoing friction on the attacker and, after reconnection, the burn on the entire network's economic activity gradually absorbs excess supply.
 
 4. **Cycling prevention**: The net-income cap prevents the attacker from inflating debits by cycling MHR between their own nodes. Only net one-directional flows count toward minting eligibility.
 
 5. **Self-correcting on merge**: Excess supply dilutes ALL holders equally, including the attacker's own holdings. The emission schedule decays geometrically, so any supply shock becomes negligible over time.
 
+#### Supply Dynamics Proof
+
+The attacker's supply growth per epoch depends on their spending strategy. Let `S_k` = supply at epoch k, `E_s` = scaled emission, `b` = burn rate (0.02), and `A_k` = economic activity (total one-directional payments):
+
+```
+Supply recurrence:
+  S_{k+1} = S_k - b × A_k + min(E_s, 0.5 × 0.98 × A_k)
+
+  Minting requires positive net income. A rational attacker structures
+  one-directional payments (no cycling within an epoch) to maximize
+  net income. Each epoch, the sender alternates (A→B in epoch k,
+  B→A in epoch k+1) to avoid same-epoch cycling.
+
+  The attacker chooses A_k to maximize S_{k+1}:
+    If 0.49 × A_k < E_s (revenue cap binds):
+      gain = 0.49 × A_k - 0.02 × A_k = 0.47 × A_k
+      → maximized by A_k = S_k (spend everything)
+    If 0.49 × A_k ≥ E_s (emission cap binds):
+      gain = E_s - 0.02 × A_k
+      → maximized by A_k = E_s / 0.49 ≈ 2.04 × E_s (spend minimum)
+
+  Phase 1 (S_k < 2.04 × E_s): attacker spends everything
+    S_{k+1} = S_k + 0.47 × S_k = 1.47 × S_k  (exponential growth)
+
+  Phase 2 (S_k ≥ 2.04 × E_s): attacker spends only 2.04 × E_s
+    S_{k+1} = S_k + E_s - 0.02 × 2.04 × E_s = S_k + 0.959 × E_s
+    (linear growth at ~0.96 × E_s per epoch, no equilibrium)
+```
+
+The attacker reaches Phase 2 quickly (about `log(2.04 × E_s / M_0) / log(1.47)` epochs from initial capital `M_0`). After that, supply grows linearly:
+
+```
+Worst-case supply bound (optimal attacker, post-Phase 1):
+  S_K ≈ 2.04 × E_s + 0.959 × E_s × K  (after K epochs in Phase 2)
+
+  Simpler upper bound (per epoch):
+    Supply growth ≤ E_s per epoch  (emission is the hard ceiling)
+
+  Example (3-node partition, bootstrap emission, 1000 epochs ≈ 1 week):
+    E_s = 30,000 MHR/epoch
+    Max excess after 1000 epochs: ~30,000 × 1000 = 30M MHR
+    Total network supply at epoch 100,000: ~10^11 MHR
+    Impact: 0.00003% of supply  → negligible
+
+  Example (3-node partition, after 5 halvings, 1000 epochs):
+    E_s = 937.5 MHR/epoch
+    Max excess after 1000 epochs: ~937,500 MHR  → negligible
+
+  Total lifetime excess (infinite-duration partition, all halvings):
+    Σ E_s per halving period = (N/100) × E × 100,000 × Σ 2^(-n)
+    = (N/100) × E × 100,000 × 2 = (N/100) × 2 × 10^17 μMHR
+    For N=3: 6 × 10^15 μMHR = 6 × 10^9 MHR
+    As fraction of supply ceiling: 6 × 10^9 / 1.84 × 10^13 = 0.033%
+    → Even an infinitely long 3-node partition produces < 0.04% dilution
+```
+
+**Note on the `E_s / burn_rate` formula**: Under 100% money velocity (attacker circulates ALL supply every epoch), a true equilibrium exists at `S* = E_s / burn_rate`. This is because `S_{k+1} = 0.98 × S_k + E_s`, which converges to `E_s / 0.02`. However, a rational attacker avoids this by spending only the minimum needed to saturate the minting cap, keeping a reserve that is never burned. The per-epoch growth bound (`≤ E_s`) and the convergent halving sum are the correct worst-case bounds.
+
 **Why three layers**: Each defense targets a different phase of the attack:
 - Genesis attestation prevents the attack during bootstrap (when damage is maximal)
-- Active-set scaling limits emission rate regardless of economic activity
-- Service burn ensures long-running partitions converge to equilibrium (not unbounded growth)
+- Active-set scaling limits emission rate regardless of economic activity — this is the primary quantitative defense
+- Service burn imposes ~4% friction during isolation and, more importantly, absorbs excess supply after merge via ongoing 2% deflation on the entire network's economic activity
 
-**Residual risk**: Post-bootstrap (epoch > 100,000), an isolated partition's supply is bounded by `scaled_emission / burn_rate`. For small partitions at maturity, this is negligible. The attack remains theoretically possible but quantifiably bounded — this is the inherent cost of partition tolerance without global consensus.
+**Residual risk**: Post-bootstrap (epoch > 100,000), an isolated partition's supply grows at most `E_s` per epoch (scaled emission). For small partitions at maturity, this is negligible: a 3-node partition after 5 halvings grows at most 937.5 MHR/epoch. Over realistic durations (days to weeks), the total excess is a vanishingly small fraction of circulating supply. Over infinite duration, the total excess is bounded by the convergent halving sum — less than 0.04% dilution for a 3-node partition. This is the inherent cost of partition tolerance without global consensus — bounded, predictable, and self-correcting.
 
 ### Attack: Artificial Partition Creation
 
@@ -1028,14 +1048,14 @@ Multi-partition attack economics (with active-set scaling + burn):
   K partitions, each with N_k nodes fully controlled by attacker
   Total attacker nodes: Σ N_k
 
-  Per-partition scaled emission: (N_k / 100) × E
-  Per-partition equilibrium supply: (N_k / 100) × E / 0.02
+  Per-partition max growth: (N_k / 100) × E per epoch
+  Per-partition max over T epochs: (N_k / 100) × E × T
 
-  Total attacker equilibrium: Σ (N_k / 100) × E / 0.02
-                            = (Σ N_k / 100) × E / 0.02
+  Total attacker max growth: Σ (N_k / 100) × E per epoch
+                            = (Σ N_k / 100) × E per epoch
 
   Key insight: splitting nodes across K partitions gives the SAME total
-  equilibrium as one partition with Σ N_k nodes. There is no advantage
+  growth rate as one partition with Σ N_k nodes. There is no advantage
   to fragmenting into multiple partitions.
 
   During bootstrap: genesis-anchored minting prevents all isolated
@@ -1047,7 +1067,7 @@ Multi-partition attack economics (with active-set scaling + burn):
     - No scaling advantage over a single partition of the same total size
 ```
 
-**Residual risk**: No advantage over single-partition attack. Same equilibrium bound applies. During bootstrap, completely prevented by genesis attestation.
+**Residual risk**: No advantage over single-partition attack. Same per-epoch growth bound applies. During bootstrap, completely prevented by genesis attestation.
 
 ### Attack: Channel Balance Inflation
 
@@ -1057,7 +1077,7 @@ Multi-partition attack economics (with active-set scaling + burn):
 
 Channel opening requires both parties to sign the initial state. The balances must be backed by ledger holdings. Creating MHR from nothing requires forging the CRDT state, which requires forging settlement records (dual Ed25519 signatures) or corrupting epoch snapshots (67% acknowledgment threshold).
 
-**Residual risk**: None under normal operation. In a fully attacker-controlled partition, the attacker can corrupt the local CRDT state — but this reduces to the [Isolated Partition](#attack-isolated-partition) attack, bounded by scaled emission, burn equilibrium, and genesis attestation.
+**Residual risk**: None under normal operation. In a fully attacker-controlled partition, the attacker can corrupt the local CRDT state — but this reduces to the [Isolated Partition](#attack-isolated-partition) attack, bounded by scaled emission per epoch and genesis attestation.
 
 ### Attack: Double-Spend via Old Channel State
 
@@ -1081,7 +1101,7 @@ Channel opening requires both parties to sign the initial state. The balances mu
 
 **Defense**: GCounter entries are per-node — each processing node writes only to its own entry. Merge takes pointwise maximum. Increases must correspond to valid settlement records, which require dual Ed25519 signatures. A node that inflates its own entry without corresponding settlements is detectable by any peer that compares the claimed delta against available settlement records during the epoch verification window.
 
-**Residual risk**: In a partition where all verifiers are attacker nodes, inflation goes undetected locally. On merge, this reduces to the [Isolated Partition](#attack-isolated-partition) attack — bounded by scaled emission, burn equilibrium, and genesis attestation, and corrected during epoch reconciliation.
+**Residual risk**: In a partition where all verifiers are attacker nodes, inflation goes undetected locally. On merge, this reduces to the [Isolated Partition](#attack-isolated-partition) attack — bounded by scaled emission per epoch and genesis attestation, and corrected during epoch reconciliation.
 
 ### Attack: VRF Lottery Manipulation
 
@@ -1109,8 +1129,8 @@ Channel opening requires both parties to sign the initial state. The balances mu
 | Content/Job ID grinding | Unpredictable epoch_hash | None |
 | Relay non-forwarding | VRF requires real packet + sender detection | Individual packet drops |
 | Storage/compute fabrication | Bilateral client verification | Brief undetected period |
-| **Isolated partition** | **Genesis attestation (bootstrap) + burn + scaled emission** | **Bounded: scaled_emission / burn_rate** |
-| Artificial partition creation | Same as isolated partition; no advantage to splitting | Same equilibrium bound |
+| **Isolated partition** | **Genesis attestation (bootstrap) + burn + scaled emission** | **Bounded: ≤ E_s per epoch (convergent via halving)** |
+| Artificial partition creation | Same as isolated partition; no advantage to splitting | Same per-epoch growth bound |
 | Channel balance inflation | CRDT ledger validation | None (connected) |
 | Double-spend (old state) | 48-hour dispute window | Offline counterparty |
 | Settlement forgery | Dual Ed25519 signatures | None |
@@ -1118,7 +1138,7 @@ Channel opening requires both parties to sign the initial state. The balances mu
 | VRF lottery manipulation | Cryptographic (one output per input) | None |
 | Trust/credit exploitation | Credit limits + voucher absorbs debt | One-time credit loss |
 
-**All attack vectors are now bounded.** The isolated partition — previously the only vector with material residual risk — is now defended by three layers: genesis-anchored minting (eliminates the attack during bootstrap), active-set-scaled emission (limits small-partition minting rate), and 2% service burn (ensures supply converges to a finite equilibrium). The residual risk is quantifiable: `scaled_emission / burn_rate`, which is negligible at maturity. This is the inherent cost of partition tolerance without global consensus — bounded, predictable, and self-correcting.
+**All attack vectors are now bounded.** The isolated partition — previously the only vector with material residual risk — is now defended by three layers: genesis-anchored minting (eliminates the attack during bootstrap), active-set-scaled emission (limits small-partition minting rate — the primary quantitative defense), and 2% service burn (provides ~4% friction during isolation and absorbs excess supply after merge). The residual risk is quantifiable: at most `E_s` per epoch, where the halving schedule ensures cumulative excess converges even over infinite duration — less than 0.04% dilution for a 3-node partition. This is the inherent cost of partition tolerance without global consensus — bounded, predictable, and self-correcting.
 
 ## Long-Term Sustainability
 
