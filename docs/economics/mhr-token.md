@@ -1031,12 +1031,64 @@ Worst-case supply bound (optimal attacker, post-Phase 1):
 
 **Note on the `E_s / burn_rate` formula**: Under 100% money velocity (attacker circulates ALL supply every epoch), a true equilibrium exists at `S* = E_s / burn_rate`. This is because `S_{k+1} = 0.98 × S_k + E_s`, which converges to `E_s / 0.02`. However, a rational attacker avoids this by spending only the minimum needed to saturate the minting cap, keeping a reserve that is never burned. The per-epoch growth bound (`≤ E_s`) and the convergent halving sum are the correct worst-case bounds.
 
+#### Attacker Economics: Cost vs. Damage
+
+The isolated partition attack requires real hardware (VMs, Raspberry Pis, or other devices) running continuously. The attacker's return on investment determines whether the attack is practical at scale.
+
+```
+Cost-damage analysis (post-bootstrap, first halving period):
+
+  N = attacker nodes (each requires one device/VM)
+  E_s = (N/100) × 500,000 MHR/epoch  (capped at 500,000 for N ≥ 100)
+  Annual excess = E_s × 52,600 epochs/year
+  Total supply at epoch 100,000: ~10^11 MHR
+  Hardware cost ≈ $5/month per cloud VM (low estimate)
+
+  N     E_s/epoch   Annual excess    Annual dilution   Lifetime dilution   VM cost/year
+  ---   ---------   ------------     ---------------   -----------------   ------------
+    3      15,000       789M MHR     0.8% of supply          1.5%              $180
+   10      50,000     2,630M MHR     2.6% of supply          5.0%              $600
+   50     250,000    13,150M MHR    13.2% of supply         25.0%            $3,000
+  100     500,000    26,300M MHR    26.3% of supply         50.0%            $6,000
+  200     500,000    26,300M MHR    26.3% of supply         50.0%           $12,000
+
+  Notes:
+    - "Annual dilution" is the first year only; subsequent years are halved
+    - "Lifetime dilution" assumes infinite duration (convergent halving sum)
+    - Active-set cap at 100 means nodes beyond 100 add cost but no damage
+    - These are upper bounds: actual dilution decreases as emission halves
+```
+
+**Key observations**:
+
+1. **Small partitions (N ≤ 10) are negligible.** A 3-node attack costs $180/year and causes 0.8% annual dilution in the first year, declining to 0.4% in the next, 0.2% after that — comparable to typical monetary inflation. The lifetime bound is 1.5% even if maintained forever. This is the inherent cost of partition tolerance.
+
+2. **Large partitions (N = 50–100) are expensive and visible.** A 100-node attack costs $6,000/year and produces 26% annual dilution in the first year — significant, but halving to 13% the next year, 6.5% after that, etc. The attack requires maintaining 100 VMs indefinitely and is readily detectable by supply monitoring. The active-set cap at 100 means adding more nodes beyond 100 increases cost without increasing damage.
+
+3. **Attack yields dilution, not theft.** Minted MHR dilutes ALL holders including the attacker. If the attacker holds fraction F of pre-attack supply, they lose F × dilution from their existing holdings. The net gain is `minted_amount - F × dilution × total_supply`, which decreases as the attacker's share of the network grows. An attacker who already holds significant MHR damages their own position by inflating supply.
+
+4. **Repeated attacks offer no compounding advantage.** An attacker who merges and re-partitions continues at the same emission rate (epoch-counted, not wall-clock). The total damage over T epochs is ≤ E_s × T regardless of how many merge/split cycles occur. There is no "compound interest" — the attack is strictly linear per epoch, and the halving schedule steadily reduces E_s.
+
+5. **Honest participation earns the same per-node return.** In a connected network with M active nodes, each honest node earns approximately E/M per epoch. For M = 100, this equals E/100 = E_s/N per node — the same per-node return as the isolated partition attack. The attack is not more efficient than honest service on a per-node basis; it simply avoids providing real service. For M > 100, honest nodes earn less per node than attacker nodes, but the honest nodes also build reputation, earn bilateral payment income, and contribute to a network whose value they share.
+
 **Why three layers**: Each defense targets a different phase of the attack:
 - Genesis attestation prevents the attack during bootstrap (when damage is maximal)
 - Active-set scaling limits emission rate regardless of economic activity — this is the primary quantitative defense
 - Service burn imposes ~4% friction during isolation and, more importantly, absorbs excess supply after merge via ongoing 2% deflation on the entire network's economic activity
 
-**Residual risk**: Post-bootstrap (epoch > 100,000), an isolated partition's supply grows at most `E_s` per epoch (scaled emission). For small partitions at maturity, this is negligible: a 3-node partition after 5 halvings grows at most 937.5 MHR/epoch. Over realistic durations (days to weeks), the total excess is a small fraction of circulating supply (< 0.1% for a 3-node partition lasting a month). Over infinite duration, the total excess is bounded by the convergent halving sum — ~1.5% of circulating supply for a 3-node partition, and proportionally more for larger partitions (N/200). This is the inherent cost of partition tolerance without global consensus — bounded, predictable, and self-correcting.
+#### Can This Attack Ruin the Network?
+
+No. Three properties prevent isolated partition attacks from causing unbounded or catastrophic damage:
+
+1. **Damage is bounded even over infinite time.** The convergent halving sum limits lifetime dilution to N/200 of circulating supply (capped at 50% for N ≥ 100). This is a hard mathematical ceiling — no amount of attacker persistence can exceed it.
+
+2. **Damage rate decreases over time.** Each halving period (≈ 1.9 years), the attacker's per-epoch minting is halved. First-year dilution of 0.8% (3 nodes) becomes 0.4%, then 0.2%, and so on. The attack is front-loaded and self-limiting.
+
+3. **Network value grows faster than attacker damage.** A healthy network's total economic value (real services transacted) grows with adoption, while the attacker's dilution rate shrinks with each halving. The ratio of attack damage to network value decreases over time — the attack becomes less relevant, not more.
+
+The fundamental tradeoff: Mehr chooses **partition tolerance over inflation resistance**. A globally-consistent ledger (blockchain) can prevent this attack entirely, but at the cost of requiring global consensus — which fails during partitions. Mehr accepts bounded, predictable, decreasing inflation from isolated partitions in exchange for partition tolerance. This is the same tradeoff every CRDT-based system makes: eventual consistency allows temporary divergence, but convergence is guaranteed.
+
+**Residual risk**: Post-bootstrap (epoch > 100,000), an isolated partition's supply grows at most `E_s` per epoch (scaled emission). For small partitions (N ≤ 10), annual dilution is comparable to typical monetary inflation (< 3%) and lifetime dilution is ≤ 5% — negligible for a utility token. For large partitions (N = 100), annual dilution starts at 26% but halves every ≈ 1.9 years and requires $6,000+/year in hardware. The active-set cap at 100 means no partition can exceed 50% lifetime dilution regardless of size. This is the inherent, quantified cost of partition tolerance without global consensus — bounded, predictable, and self-correcting.
 
 ### Attack: Artificial Partition Creation
 
@@ -1140,7 +1192,7 @@ Channel opening requires both parties to sign the initial state. The balances mu
 | VRF lottery manipulation | Cryptographic (one output per input) | None |
 | Trust/credit exploitation | Credit limits + voucher absorbs debt | One-time credit loss |
 
-**All attack vectors are now bounded.** The isolated partition — previously the only vector with material residual risk — is now defended by three layers: genesis-anchored minting (eliminates the attack during bootstrap), active-set-scaled emission (limits small-partition minting rate — the primary quantitative defense), and 2% service burn (provides ~4% friction during isolation and absorbs excess supply after merge). The residual risk is quantifiable: at most `E_s` per epoch, where the halving schedule ensures cumulative excess converges — ~N/200 of circulating supply for an infinite-duration partition (1.5% for 3 nodes). Over realistic durations, dilution is far smaller (< 0.1% for a 3-node partition lasting a month). This is the inherent cost of partition tolerance without global consensus — bounded, predictable, and self-correcting.
+**All attack vectors are now bounded.** The isolated partition — previously the only vector with material residual risk — is now defended by three layers: genesis-anchored minting (eliminates the attack during bootstrap), active-set-scaled emission (limits small-partition minting rate — the primary quantitative defense), and 2% service burn (provides ~4% friction during isolation and absorbs excess supply after merge). The residual risk is quantifiable: at most `E_s` per epoch, where the halving schedule ensures cumulative excess converges — ~N/200 of circulating supply for an infinite-duration partition (capped at 50% for N ≥ 100). For small partitions (N ≤ 10), lifetime dilution is ≤ 5%; for the worst case (N ≥ 100), lifetime dilution caps at 50% but requires $6,000+/year in hardware and decreases by half every ≈ 1.9 years. Repeated attacks offer no compounding advantage. See [Attacker Economics](#attacker-economics-cost-vs-damage) and [Can This Attack Ruin the Network?](#can-this-attack-ruin-the-network) for the full cost-damage analysis. This is the inherent, quantified cost of partition tolerance without global consensus — bounded, predictable, and self-correcting.
 
 ## Long-Term Sustainability
 

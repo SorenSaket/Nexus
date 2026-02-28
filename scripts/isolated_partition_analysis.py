@@ -159,7 +159,7 @@ def main():
 
     # --- 3. Total lifetime excess (convergent halving sum) ---
     print(f"\n3. TOTAL LIFETIME EXCESS (infinite-duration partition)")
-    for n in [3, 5, 10, 50]:
+    for n in [3, 5, 10, 50, 100]:
         total = cumulative_excess(n, start_epoch)
         supply = cumulative_supply_at(start_epoch + 20 * HALVING_INTERVAL)
         pct = total / supply * 100 if supply > 0 else 0
@@ -176,6 +176,24 @@ def main():
         e_s = scaled_emission(n, start_epoch)
         pct = hist[-1] / supply * 100
         print(f"   {n:>5d}  {e_s:>12,.1f}  {hist[-1]:>14,.1f}  {pct:>12.6f}%")
+
+    # --- 5. Cost-damage analysis ---
+    EPOCHS_PER_YEAR = 52_600
+    VM_COST_MONTHLY = 5  # $5/month per cloud VM (low estimate)
+    print(f"\n5. ATTACKER ECONOMICS: COST vs. DAMAGE")
+    print(f"   {'N':>5s}  {'E_s/epoch':>12s}  {'Annual excess':>16s}  {'Annual %':>10s}"
+          f"  {'Lifetime %':>12s}  {'VM $/yr':>10s}")
+    print(f"   {'-'*5}  {'-'*12}  {'-'*16}  {'-'*10}  {'-'*12}  {'-'*10}")
+    for n in [3, 5, 10, 20, 50, 100, 200]:
+        e_s = scaled_emission(n, start_epoch)
+        annual = e_s * EPOCHS_PER_YEAR
+        annual_pct = annual / supply * 100
+        lifetime = cumulative_excess(n, start_epoch)
+        mature_supply = cumulative_supply_at(start_epoch + 20 * HALVING_INTERVAL)
+        lifetime_pct = lifetime / mature_supply * 100 if mature_supply > 0 else 0
+        cost = n * VM_COST_MONTHLY * 12
+        print(f"   {n:>5d}  {e_s:>12,.1f}  {annual:>16,.0f}  {annual_pct:>10.3f}"
+              f"  {lifetime_pct:>12.1f}  ${cost:>9,d}")
 
     # --- Plot ---
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
@@ -231,18 +249,21 @@ def main():
    - Total lifetime excess converges because emission halves:
      Σ E_s × halving_period = (N/100) × E × 100,000 × 2 (geometric sum)
 
-3. PRACTICAL IMPACT:
-   - A 3-node partition lasting 1 week: ~0.00001% dilution → negligible
-   - A 3-node partition lasting forever: < 0.04% dilution → bounded
-   - Active-set scaling is the PRIMARY defense (reduces E_s by N/100)
-   - Service burn provides marginal friction (~4%) during isolation
-     and absorbs excess supply after reconnection
+3. ATTACKER ECONOMICS:
+   - A 3-node attack costs $180/year for 0.8% annual dilution (first year)
+   - A 100-node attack costs $6,000/year for 26% annual dilution (first year)
+   - Annual dilution halves every ~1.9 years (emission halving)
+   - Active-set cap at 100: no benefit from running > 100 nodes
+   - Repeated attacks (merge/split) offer no compounding advantage
+   - Honest participation earns similar per-node return
 
-4. THREE-LAYER DEFENSE REMAINS VALID:
-   - Genesis attestation: eliminates attack during bootstrap (complete)
-   - Active-set scaling: limits growth to (N/100) × E per epoch (primary)
-   - Service burn: ~4% friction + post-merge absorption (supplementary)
-   - Halving schedule: ensures cumulative excess converges over time
+4. CAN ATTACKERS RUIN THE NETWORK?
+   - No. Lifetime dilution is bounded: N/200 of supply (max 50% for N ≥ 100)
+   - Damage rate decreases over time (halving schedule)
+   - Small partitions (N ≤ 10): < 5% lifetime dilution → negligible
+   - Large partitions (N = 100): 50% lifetime → significant but requires
+     $6,000+/year indefinitely, decreasing return each halving period
+   - This is the inherent cost of partition tolerance without global consensus
 """)
 
     # Save summary table
@@ -271,8 +292,23 @@ def main():
         f.write(f"  1 week (1000 epochs):  {optimal[-1]:>14,.1f} MHR\n")
 
         total_3 = cumulative_excess(3, start_epoch)
+        mature_supply = cumulative_supply_at(start_epoch + 20 * HALVING_INTERVAL)
+        lifetime_pct = total_3 / mature_supply * 100 if mature_supply > 0 else 0
         f.write(f"  Infinite duration:     {total_3:>14,.1f} MHR (convergent sum)\n")
-        f.write(f"  As % of supply:        < 0.04%\n")
+        f.write(f"  As % of mature supply: {lifetime_pct:.1f}%\n\n")
+
+        f.write("Cost-damage analysis (first halving period, $5/mo per VM):\n")
+        f.write(f"  {'N':>5s}  {'E_s/epoch':>12s}  {'Annual dilution':>16s}"
+                f"  {'Lifetime':>10s}  {'VM $/yr':>10s}\n")
+        f.write(f"  {'-'*5}  {'-'*12}  {'-'*16}  {'-'*10}  {'-'*10}\n")
+        for n in [3, 10, 50, 100]:
+            e_s = scaled_emission(n, start_epoch)
+            annual_pct = e_s * 52_600 / supply * 100
+            lt = cumulative_excess(n, start_epoch)
+            lt_pct = lt / mature_supply * 100 if mature_supply > 0 else 0
+            cost = n * 5 * 12
+            f.write(f"  {n:>5d}  {e_s:>12,.1f}  {annual_pct:>15.1f}%"
+                    f"  {lt_pct:>9.1f}%  ${cost:>9,d}\n")
 
     print(f"\nOutput saved to {output_dir}/")
 
