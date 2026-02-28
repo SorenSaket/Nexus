@@ -104,7 +104,59 @@ ChannelState {
 
 1. **Open**: Both parties agree on initial balances. Both sign the opening state (`sequence = 0`).
 2. **Update**: On each lottery win, the balance shifts by the reward amount and `sequence` increments by 1. Both parties sign the updated state. Channel updates are infrequent — only triggered by wins.
-3. **Settle**: Either party can request settlement. Both sign a `SettlementRecord` whose `final_sequence` matches the current channel `sequence`. The record is gossiped to the network and applied to the [CRDT ledger](crdt-ledger). The channel remains open after settlement — subsequent lottery wins continue from the settled point.
+3. **Settle**: Either party can request settlement. The settlement follows a **two-phase signing protocol** with timeout:
+
+   ```
+   Settlement atomicity protocol:
+
+     Phase 1: PROPOSE
+       Initiator creates SettlementRecord with current balances and sequence.
+       Initiator signs it (sig_a or sig_b, depending on who initiates).
+       Initiator sends the half-signed record to the counterparty.
+
+     Phase 2: COUNTERSIGN
+       Counterparty verifies: balances match local channel state, sequence matches.
+       Counterparty signs the record (adding the second signature).
+       Counterparty sends the fully-signed record back to the initiator.
+       Both parties gossip the fully-signed record to the network.
+
+     Timeout handling:
+       settlement_timeout = 120 gossip rounds (~2 hours at 60-second rounds)
+
+       If counterparty does not countersign within settlement_timeout:
+         1. The half-signed record is DISCARDED (not published)
+         2. The channel remains open with its current state
+         3. The initiator may retry settlement
+         4. After 3 failed settlement attempts (3 × timeout = ~6 hours):
+            The initiator may file a UNILATERAL SETTLEMENT using the
+            last mutually-signed ChannelState:
+              UnilateralSettlement {
+                  channel_id: [u8; 16],
+                  last_state: ChannelState,    // must have both signatures
+                  reason: enum { CounterpartyUnresponsive, ChannelAbandonment },
+                  filed_by: NodeID,
+                  signature: Ed25519Signature,
+              }
+            The unilateral settlement enters a challenge window (2,880 gossip
+            rounds / ~48 hours). The counterparty can respond with a
+            higher-sequence state to override.
+
+     Partial (one-signature) state:
+       A SettlementRecord with only one signature is NEVER published to the
+       network. It is strictly a local, ephemeral negotiation artifact.
+       The CRDT ledger only accepts records with both valid signatures.
+       This is all-or-nothing — there is no partial settlement state.
+
+     Channel close after repeated failure:
+       If settlement fails repeatedly (counterparty consistently offline):
+         1. After 4 epochs of no updates: standard abandonment rules apply
+            (either party unilaterally closes with last mutually-signed state)
+         2. The unilateral close enters the 2,880-round challenge window
+         3. If unchallenged: the close is finalized and balances are settled
+         4. Remaining balance returns to each party per the last signed state
+   ```
+
+   Both sign a `SettlementRecord` whose `final_sequence` matches the current channel `sequence`. The record is gossiped to the network and applied to the [CRDT ledger](crdt-ledger). The channel remains open after settlement — subsequent lottery wins continue from the settled point.
 4. **Dispute**: If one party submits an old state, the counterparty can submit a higher-sequence state within a **2,880 gossip round challenge window** (~48 hours at 60-second rounds). The higher sequence always wins.
 5. **Abandonment**: If a channel has no updates for **4 epochs**, either party can unilaterally close with the last mutually-signed state. This prevents permanent fund lockup.
 

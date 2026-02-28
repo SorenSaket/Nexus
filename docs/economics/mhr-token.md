@@ -1153,7 +1153,7 @@ The tail emission exists specifically for this: it ensures service providers alw
 | **New radio technologies** | Transport-agnostic — any medium that moves bytes works |
 | **Post-quantum cryptography** | [KeyRotation](../services/mhr-id) claims enable key migration; new algorithms plug into existing identity framework |
 | **Hardware evolution** | Capability marketplace adapts — nodes advertise what they can do, not what they are |
-| **Protocol upgrades** | Open question — no formal governance mechanism yet. Communities can fork; the trust graph is the real network, not the protocol version |
+| **Protocol upgrades** | [MEP governance](../development/versioning#governance) — trust-weighted version signaling via announces, ≥67% acceptance threshold. Communities can fork; gateway bridges maintain connectivity across versions |
 
 ### What Doesn't Change
 

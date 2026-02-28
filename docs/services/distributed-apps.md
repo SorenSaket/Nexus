@@ -354,6 +354,141 @@ StateSchema {
     compatible_with: [Blake3Hash],          // previous schema hashes (additive compat)
     migration_contract: Option<Blake3Hash>, // contract for breaking migrations
 }
+
+FieldDef {
+    name: String,                           // field name (max 32 bytes UTF-8)
+    crdt_type: CRDTType,                    // GCounter, GSet, LWWRegister, ORSet, RGA, etc.
+    default_value: Vec<u8>,                 // CBOR-encoded default for new fields
+    required: bool,                         // false = optional field (can be absent)
+}
+```
+
+### Schema Compatibility Rules
+
+Compatibility between schema versions is **programmatically verifiable**, not purely declared by the developer. A new schema is **additive-compatible** with an old schema if and only if all of the following hold:
+
+```
+Additive compatibility rules (checked by runtime):
+
+  1. NO REMOVED FIELDS: Every field in the old schema exists in the new schema
+     with the same name and same CRDT type.
+
+  2. NO TYPE CHANGES: A field's CRDT type CANNOT change between versions.
+     Rationale: CRDT merge semantics are type-dependent. A GCounter merged
+     with an LWWRegister produces undefined behavior.
+     If a field must change type → breaking migration required.
+
+  3. NEW FIELDS ONLY: The new schema may add fields not present in the old schema.
+     New fields MUST have default_value specified.
+
+  4. REQUIRED → OPTIONAL allowed: A required field can become optional.
+     OPTIONAL → REQUIRED forbidden (would break old state missing the field).
+
+Compatibility checker (runs locally at install/upgrade time):
+  fn is_compatible(old_schema: &StateSchema, new_schema: &StateSchema) -> bool {
+      for old_field in &old_schema.fields {
+          match new_schema.fields.find(|f| f.name == old_field.name) {
+              None => return false,                    // field removed
+              Some(new_field) => {
+                  if new_field.crdt_type != old_field.crdt_type {
+                      return false;                    // type changed
+                  }
+                  if new_field.required && !old_field.required {
+                      return false;                    // optional → required
+                  }
+              }
+          }
+      }
+      true
+  }
+```
+
+The `compatible_with` field in StateSchema lists schema hashes that pass this check. At install time, the runtime verifies the declaration by running the compatibility checker. A manifest that declares `compatible_with` for an incompatible schema is rejected.
+
+### Old Code Encountering New Schema State
+
+When a node running old code encounters new-schema state via CRDT merge:
+
+```
+Forward-compatibility behavior:
+
+  Old node receives state with unknown fields:
+    1. Unknown fields are preserved as opaque bytes during CRDT merge
+    2. Old code ignores unknown fields for application logic
+    3. Unknown fields are forwarded in gossip (pass-through)
+    4. When the node upgrades, previously-merged unknown fields
+       become usable with the new schema
+
+  This works because CRDT merges are per-field:
+    - Known fields: merge normally using the field's CRDT type
+    - Unknown fields: merge using a generic LWWRegister fallback
+      (last-writer-wins by timestamp — safe for pass-through)
+
+  If the unknown field uses a CRDT type the old node doesn't
+  understand (e.g., a new CRDT type added in a later protocol version):
+    - The field is stored as opaque bytes
+    - Merge uses byte-level LWW fallback
+    - On upgrade, the node re-merges using the correct CRDT type
+    - Temporary merge inaccuracy during the transition is self-correcting
+```
+
+### Migration Contract Execution Semantics
+
+When a breaking schema change requires a `migration_contract`, the execution follows a strict protocol:
+
+```
+Migration contract execution:
+
+  Input delivery:
+    The migration contract receives the FULL old state as a single CBOR-encoded
+    input via the LOAD opcode (key = "migration_input").
+    Rationale: incremental migration adds complexity without benefit —
+    state sizes are bounded by device tier (ESP32: 32 KB, Pi: 1 MB,
+    Gateway: 256 MB), so full-state delivery is practical.
+
+  Contract interface:
+    // Entry point
+    fn migrate(old_state: CBOR) -> Result<CBOR, MigrationError>
+
+    // The contract:
+    //   1. Reads old state from LOAD("migration_input")
+    //   2. Transforms fields according to the new schema
+    //   3. Writes new state to STORE("migration_output")
+    //   4. Returns HALT (success) or ABORT (failure)
+
+  Success criteria:
+    1. Contract terminates with HALT (not ABORT)
+    2. Output at STORE("migration_output") is valid CBOR
+    3. Output conforms to the new StateSchema (all required fields present,
+       correct CRDT types)
+    4. Migration completes within max_cycles (from contract declaration)
+
+  Failure modes:
+    - Runtime exception (ABORT opcode): migration_failed, old state preserved
+    - Wrong output shape (schema validation fails): migration_failed
+    - Timeout (max_cycles exceeded): migration_failed, old state preserved
+    - All failures are recoverable — old app version remains functional
+
+  Determinism guarantee:
+    Migration contracts MUST be deterministic (same as all MHR-Byte/WASM).
+    Two nodes migrating the same state produce identical outputs.
+    If nondeterminism is detected (different nodes get different outputs
+    for the same input — detected via hash comparison during CRDT sync):
+      - The output with the LOWER Blake3 hash wins (arbitrary but deterministic)
+      - This should never happen if the contract is correctly written
+      - Detection triggers a warning to the app publisher
+
+  Rollback:
+    No automatic rollback. If migration succeeds but causes application bugs:
+      1. User can pin to old manifest hash (old state still accessible by hash)
+      2. Publisher can release a new version with a fix
+      3. Old DataObjects remain in MHR-Store indefinitely
+
+  Partial migration:
+    NOT supported. Migration is all-or-nothing per state object.
+    Rationale: partial migration creates inconsistent state that violates
+    schema invariants. If some fields can migrate independently, they
+    should be separate DataObjects in the schema design.
 ```
 
 ### Partition Behavior

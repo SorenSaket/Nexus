@@ -167,6 +167,112 @@ An attacker with 50 NodeIDs but 3 LoRa radios:
 - The other 47 NodeIDs either don't respond (weight = 0) or respond from the same radio (detected by witnesses, weight = 0)
 - Net result: 3 votes, not 50
 
+### Radio Fingerprinting Algorithm
+
+Witnesses distinguish distinct radios using a **multi-feature classifier** based on physical-layer characteristics:
+
+```
+Radio fingerprinting features:
+
+  1. RSSI Pattern (primary):
+     Multiple witnesses at known positions measure RSSI of each response.
+     The RSSI vector (e.g., [-80, -65, -92] across 3 witnesses) forms
+     a spatial signature. Two responses from the same antenna produce
+     similar RSSI vectors; different antennas at different locations
+     produce different vectors.
+
+     Similarity metric:
+       rssi_distance(a, b) = euclidean_distance(a.rssi_vector, b.rssi_vector)
+       same_radio_threshold = 6 dB (total across all witnesses)
+       Responses with rssi_distance < threshold → flagged as same radio
+
+  2. Clock Drift (secondary):
+     LoRa transmitters have slightly different crystal oscillator frequencies.
+     Carrier frequency offset (CFO) measured by witnesses provides a
+     per-radio fingerprint. CFO is stable over short time windows (minutes)
+     but varies between different hardware units.
+
+     Precision: ±50 Hz resolution on typical LoRa receivers
+     Discrimination: most LoRa modules differ by >200 Hz CFO
+
+  3. Timing Offset (tertiary):
+     The exact arrival time of each response (measured in LoRa symbol
+     periods) varies by radio — crystal accuracy affects transmission
+     start time. With 30-second response windows, timing alone is weak
+     but provides corroborating evidence.
+
+  Combined classifier:
+    fingerprint_score(a, b) = w1 × rssi_similarity(a, b)
+                            + w2 × cfo_similarity(a, b)
+                            + w3 × timing_similarity(a, b)
+    Weights: w1=0.5, w2=0.35, w3=0.15
+
+    same_radio if fingerprint_score > 0.75
+```
+
+### Error Rates
+
+```
+Estimated error rates (based on LoRa fingerprinting literature):
+
+  False positive (two DIFFERENT radios classified as same):
+    Urban (high interference):   ~3-5%
+    Suburban (moderate):          ~1-2%
+    Rural (low interference):    <1%
+
+  False negative (SAME radio classified as different):
+    With antenna/location change: ~5-10%
+    Static position:              <1%
+
+  Discrimination capacity:
+    Typical LoRa deployment: 15-30 distinct radios reliably distinguished
+    in a ~1 km² area with 3+ witnesses.
+    Above ~50 radios: RSSI vectors become crowded; CFO becomes primary
+    discriminant. Practical limit: ~100 radios per geographic cluster
+    (bounded by witness processing, not physics).
+
+  Known limitations:
+    - Identical hardware from the same batch may have similar CFO
+      (mitigated by RSSI spatial diversity)
+    - An attacker can use directional antennas to manipulate RSSI
+      (mitigated by requiring 3+ geographically distributed witnesses)
+    - Environmental changes (temperature, humidity) shift CFO over hours
+      (mitigated by the 30-second challenge window being much shorter)
+```
+
+### Remote Voter Sybil Resistance
+
+Hardware liveness only works for LoRa-reachable voters. For internet-connected remote voters, Sybil resistance relies on the other defense layers:
+
+```
+Remote voter anti-Sybil (no hardware liveness):
+
+  Layer 1: Trust Flow — still the primary defense. Remote Sybils need
+           real inbound trust edges from the honest network.
+
+  Layer 2: Personhood Vouching — remote voters still need 2 personhood
+           vouches from distinct vouchers who know them personally.
+
+  Layer 3: Temporal Requirements — 10+ epoch account age, service history.
+
+  Layer 4 (remote-specific): IP/Transport Diversity Check
+    Remote voters submit votes via internet gateways. Gateways record
+    the transport metadata (not stored, just checked in real-time):
+      - Multiple votes from the same gateway within the response window
+        are flagged for additional scrutiny
+      - Witnesses at gateways sign attestations of transport-layer diversity
+      - NOT a hard block — just a weight reduction (0.8x multiplier)
+        for same-gateway submissions
+
+  Net effect:
+    Remote voters have LOWER maximum vote weight than locally-present voters
+    (they cannot earn the StronglyVerified geo multiplier of 1.2x).
+    Their vote weight is capped at:
+      trust_flow × 1.0 (Verified geo, not StronglyVerified) × age × service
+    This naturally preferences local, physically-present voters for
+    geo-scoped decisions — which is the correct behavior.
+```
+
 ### Limitations
 
 - Only works for LoRa-reachable voters (not internet-connected nodes voting remotely)
@@ -403,17 +509,119 @@ Votes on Mehr are **public by default** — every vote is a signed DataObject vi
 - Accountability (voters stand behind their choices)
 - Delegation transparency (you can see who your delegate voted for)
 
-The tradeoff is no ballot secrecy, which enables social pressure and coercion. For communities that need secret ballots, a future extension could use commitment schemes:
+The tradeoff is no ballot secrecy, which enables social pressure and coercion. For communities that need secret ballots, Mehr provides a **commitment-scheme secret ballot** mechanism designed for partition-prone meshes.
+
+### Secret Ballot Protocol
 
 ```
-Secret ballot (future extension, design pending):
-  1. Commit phase: voters publish hash(vote || random_nonce)
-  2. Reveal phase: voters publish vote + nonce
-  3. Tally from revealed votes
-  4. Unrevealed commits are counted as abstentions
+Secret ballot specification:
+
+  1. COMMIT PHASE (during voting_period):
+     Voter publishes:
+       VoteCommitment {
+           voter: NodeID,
+           vote_id: Blake3Hash,
+           commitment: Blake3(choice || random_nonce || voter_id),
+           commit_epoch: u64,
+           signature: Ed25519Sig,
+       }
+     The commitment hides the vote choice. The voter_id in the hash
+     prevents two voters with the same choice+nonce from producing
+     identical commitments.
+
+  2. REVEAL PHASE (reveal_period epochs after voting_period ends):
+     Voter publishes:
+       VoteReveal {
+           voter: NodeID,
+           vote_id: Blake3Hash,
+           choice: enum { Yes, No, Abstain, ... },
+           nonce: [u8; 32],
+           signature: Ed25519Sig,
+       }
+     Verifier checks: Blake3(choice || nonce || voter_id) == commitment
+
+  3. TALLY PHASE (after reveal_period ends):
+     Count all valid reveals. Unrevealed commits are counted as abstentions.
 ```
 
-This is not yet specified because commitment schemes on a partition-prone mesh have unresolved edge cases (what if a voter commits but is partitioned during the reveal phase?).
+### Partition-During-Reveal Handling
+
+A voter who commits but is partitioned during reveal has their vote lost (counted as abstention). This is unavoidable without global consensus. Mehr mitigates the impact:
+
+```
+Partition-safe reveal rules:
+
+  Reveal extension window:
+    reveal_period = voting_period × 2  (default)
+    The reveal window is deliberately long to tolerate temporary partitions.
+    A voter who reconnects within the reveal period can still reveal.
+
+  Quorum adjustment for unrevealed commits:
+    unrevealed_count = commits - reveals
+    If unrevealed_count / total_commits > 0.20:
+      The vote is marked INCONCLUSIVE — too many voters were unable to reveal.
+      The proposer may re-run the vote with a longer reveal_period.
+
+  Partial reveal acceptance threshold:
+    A tally is valid if reveals >= max(quorum_threshold, 0.80 × total_commits).
+    Below 80% reveal rate: vote is INCONCLUSIVE.
+    Above 80% reveal rate: tally proceeds normally.
+
+  Rationale: 80% threshold ensures that a partition affecting up to 20%
+  of voters does not invalidate the vote, while a larger partition
+  (which could change the outcome) triggers re-vote.
+```
+
+### Partition Reconciliation
+
+If two partitions each tally independently during a partition:
+
+```
+Partition reconciliation for secret ballots:
+
+  Each partition tallies only its local reveals.
+  On merge:
+    1. Merge all VoteCommitment DataObjects (CRDT union)
+    2. Merge all VoteReveal DataObjects (CRDT union)
+    3. Late reveals (commits from partition A, revealed in partition B)
+       are accepted if received within reveal_period of the ORIGINAL
+       commit_epoch (not the merge time)
+    4. Re-tally with the merged reveal set
+    5. If merged reveal rate >= 80% of merged commits: final tally
+       If merged reveal rate < 80%: vote remains INCONCLUSIVE
+
+  The merged tally supersedes both partition-local tallies.
+  This is consistent with Mehr's eventual consistency model —
+  the pre-merge tallies were preliminary, not authoritative.
+```
+
+### Deliberate Withhold Attack
+
+A malicious voter who commits but deliberately withholds reveal to manipulate outcomes:
+
+```
+Anti-withhold defenses:
+
+  1. Withhold = abstention: A withheld reveal counts as abstention,
+     not as a spoiled ballot. The attacker gains nothing unless the
+     abstention itself changes the outcome (which requires the vote
+     to be extremely close AND the attacker to have significant weight).
+
+  2. Withhold penalty: If a voter commits but does not reveal in 3
+     consecutive secret ballots, their future commitments receive a
+     0.5x weight multiplier for 10 epochs (decaying penalty).
+     Rationale: occasional non-reveal is normal (genuine partitions);
+     repeated non-reveal is suspicious.
+
+  3. Quorum absorbs: The 80% reveal threshold means an attacker must
+     withhold >20% of total commit weight to force an INCONCLUSIVE
+     result — requiring either massive trust flow weight or many
+     colluding voters, both expensive.
+
+  4. Economic cost: A voter spends reputation to participate.
+     Repeated withholding triggers the penalty, reducing their
+     influence in future votes without any benefit from the current one.
+```
 
 ## Summary of Anti-Sybil Defenses
 

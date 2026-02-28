@@ -136,7 +136,65 @@ Name bindings propagate through the mesh via gossip, but propagation is shaped b
 
 **Gossip filtering**: Nodes only forward bindings that score above a minimum trust threshold (0.01). Bindings from completely unknown, unconnected nodes are not propagated — they must build trust relationships first. This naturally limits Sybil flooding.
 
-**Cross-scope queries**: To resolve a name in a different scope, the query propagates toward nodes whose scopes match the target. The nearest matching cluster responds with its local bindings. Results are cached locally with a TTL (default: 5 gossip intervals).
+**Cross-scope queries**: To resolve a name in a different scope, the query uses **DHT-guided scope routing**:
+
+```
+Cross-scope query algorithm:
+
+  Resolver wants to look up "alice@geo:tehran" but is in geo:portland.
+
+  1. SCOPE HASH: Compute scope_key = Blake3("geo:tehran")
+
+  2. DHT LOOKUP: Query MHR-DHT for scope_key.
+     Nodes with matching scopes register themselves as scope anchors:
+       DHT_PUT(Blake3(scope_string), ScopeAnchor { node_id, scope, timestamp })
+     Scope anchors are refreshed every 10 gossip intervals.
+
+  3. ROUTE TO ANCHOR: The DHT lookup returns one or more ScopeAnchor
+     entries — nodes whose HierarchicalScope matches "geo:tehran".
+     Select the nearest anchor by:
+       a. Trust distance (prefer anchors reachable via trusted peers)
+       b. If tied: hop count (from CompactPathCost)
+       c. If tied: lowest ring distance (XOR distance on DHT ring)
+
+  4. FORWARD QUERY: Send NameLookup message to the selected anchor.
+     The anchor resolves "alice" within its local scope using normal
+     trust-weighted resolution and returns NameLookupResponse.
+
+  5. CACHE RESULT: Cache the response locally with TTL.
+     TTL = 5 × local_gossip_interval
+     At 60-second gossip rounds: TTL = 300 seconds (5 minutes).
+     At slower transports (e.g., 5-minute LoRa gossip): TTL = 25 minutes.
+     TTL is measured in gossip intervals, not wall-clock, so it adapts
+     to transport speed automatically.
+
+  6. FALLBACK: If no ScopeAnchor exists in the DHT for the target scope
+     (no node in the reachable network has that scope):
+       a. Return NAME_NOT_FOUND with reason SCOPE_UNREACHABLE
+       b. Cache the negative result with TTL / 2 (to retry sooner)
+       c. The resolver may retry after TTL / 2 — the scope may become
+          reachable as network topology changes
+
+ScopeAnchor registration:
+  Every node registers itself as a scope anchor for each of its scopes:
+    For scope in node.scopes:
+      DHT_PUT(Blake3(scope.to_string()), ScopeAnchor {
+          node_id: self.node_id,
+          scope: scope,
+          timestamp: current_epoch,
+      })
+  Refreshed every 10 gossip intervals. Expires after 30 gossip intervals
+  without refresh (node left or partitioned).
+
+  Hierarchical registration: A node in geo:us/oregon/portland registers
+  anchors for ALL ancestor scopes:
+    Blake3("geo:us/oregon/portland")
+    Blake3("geo:us/oregon")
+    Blake3("geo:us")
+  This ensures queries at any specificity level find relevant anchors.
+```
+
+"Nearest matching cluster" is defined concretely as the anchor with the shortest trust distance, falling back to hop count and then XOR distance. This maps naturally to Mehr's existing routing — trust distance captures social proximity, hop count captures network proximity, and XOR distance captures DHT ring proximity.
 
 ## Collision Handling
 

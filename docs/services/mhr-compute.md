@@ -155,7 +155,94 @@ Since opaque compute provides no built-in execution guarantee, consumers choose 
 | **1. Reputation (default)** | Node builds reputation through consistent outputs. Bad outputs → trust removal → lost income stream. | None (built into trust system) | Moderate |
 | **2. Redundant execution** | Client sends same input to 2–3 nodes. Majority agreement = accepted result. | 2–3x compute fees | High |
 | **3. Spot-checking** | Client occasionally sends inputs with known outputs. Wrong answer → node flagged, agreement terminated. | ~5% overhead | Moderate–High |
-| **4. Cryptographic verification (future)** | ZK proofs of correct inference (active research area). Not practical for large models today. | TBD | Highest |
+| **4. Cryptographic verification** | ZK proofs for deterministic contracts; TEE attestation for opaque compute. See below. | 10–1000x (ZK) or ~5% (TEE) | Highest |
+
+### Cryptographic Verification Details
+
+ZK proofs and TEE attestation provide the strongest verification guarantees. Their applicability depends on the workload:
+
+```
+Cryptographic verification tiers:
+
+  Tier A: ZK Proofs for MHR-Byte / WASM Contracts (deterministic compute)
+
+    Viable ZK systems for Mehr's constraint environment:
+      1. RISC Zero (zkVM) — proves correct execution of RISC-V programs
+         Circuit: RISC-V trace → STARK proof
+         Proof size: ~200 KB (compressible to ~50 KB with SNARK wrapping)
+         Prover cost: ~1000x slowdown vs native execution
+         Verifier cost: ~10 ms on Raspberry Pi, <1 ms on Gateway+
+         Viable for: MHR-Byte and WASM contracts up to ~10^6 cycles
+
+      2. SP1 (Succinct) — similar approach, optimized prover
+         Proof size: ~100-300 KB
+         Prover cost: ~500-1000x slowdown
+         Viable for: same as RISC Zero, slightly better performance
+
+      3. Jolt (a]16) — optimized for structured computations
+         Proof size: ~50-150 KB
+         Prover cost: ~200-500x slowdown for simple contracts
+         Viable for: contracts with bounded loops and array operations
+
+    Practical overhead for typical workloads:
+      Simple validation contract (10^4 cycles): ~10 second prover time
+      Complex state migration (10^6 cycles): ~15 minutes prover time
+      ZK proofs are IMPRACTICAL above ~10^8 cycles with current technology
+
+    Cost model:
+      zk_proof_cost = base_compute_cost × zk_overhead_factor
+      zk_overhead_factor = 500 (default, adjustable by provider)
+      Consumer pays for the proof generation as part of the compute fee
+
+    Integration:
+      ComputeResult {
+          job_hash: Blake3Hash,
+          output_hash: Blake3Hash,
+          proof: Option<ZKProof>,    // present when ZK verification requested
+          proof_system: u8,          // 0=None, 1=RISC_Zero, 2=SP1, 3=Jolt
+      }
+      Verifier checks proof against (contract_hash, input_hash, output_hash)
+      Any node can verify without re-executing the contract
+
+  Tier B: TEE Attestation for Opaque Compute (non-deterministic / large models)
+
+    ZK proofs are impractical for large ML models (10^12+ operations).
+    TEE attestation is the viable path for high-assurance opaque compute:
+
+      TEE platforms:
+        AMD SEV-SNP: Available now on EPYC processors
+        NVIDIA H100 Confidential Computing: GPU compute inside TEE
+        ARM CCA (Confidential Compute Architecture): Emerging
+
+      Attestation flow:
+        1. Provider generates attestation report from TEE hardware
+        2. Report binds: TEE identity + loaded code hash + platform state
+        3. Consumer verifies report against vendor's root of trust
+        4. If valid: the code running in the TEE matches expectations
+
+      Cost: ~5% overhead vs plaintext (hardware-level, nearly free)
+      Trust assumption: hardware vendor is honest
+
+    For Mehr:
+      TEE attestation is preferred over ZK for models > 10^6 parameters.
+      Nodes advertise TEE support in capability bits.
+      Attestation reports are ~2-4 KB, verified by the consumer.
+
+  Decision matrix:
+    Workload                    Recommended verification
+    ─────────────────────────   ──────────────────────────
+    MHR-Byte contract (<10^4)   ZK proof (cheap, fast)
+    WASM contract (<10^6)       ZK proof (feasible)
+    WASM contract (>10^6)       Redundant execution or TEE
+    Small ML model (<1M params) Redundant execution + spot-check
+    Large ML model (>1M params) TEE attestation (if available)
+    Any model on GPU             TEE (NVIDIA H100 CC) or reputation
+    No TEE, large model          Reputation + spot-checking (default)
+
+  Mehr does NOT mandate any single verification approach.
+  The consumer chooses based on sensitivity, budget, and available providers.
+  The protocol provides the framework; the market determines adoption.
+```
 
 Verification is a **consumer-side choice**, not protocol enforcement. Most consumers rely on reputation (the default). High-value or adversarial workloads use redundant execution or spot-checking.
 

@@ -221,7 +221,59 @@ PQC migration plan:
       - Hybrid schemes (Ed25519 + PQC) during transition
 ```
 
-Post-quantum VRF is an open research area. If no standard emerges, the relay lottery may need to switch to an alternative proof-of-work mechanism. This is tracked as an [open question](open-questions).
+### Post-Quantum VRF Strategy
+
+Post-quantum VRF is an active research area with no production standard. Mehr's strategy is a **two-track approach**: adopt a PQ VRF candidate when one matures, with a hash-based fallback ready if needed.
+
+```
+PQ VRF candidates (ranked by viability):
+
+  1. Lattice-based VRF (XVRF, based on Module-LWE)
+     Pros: Compact proofs (~1.5 KB), fast verification
+     Cons: No NIST standard yet, ongoing cryptanalysis
+     Timeline: Likely standardized by 2030-2035
+
+  2. Hash-based VRF (using SLH-DSA / SPHINCS+ signatures)
+     Pros: Conservative security assumptions, NIST-standardized base
+     Cons: Large proofs (~8-17 KB), requires multi-packet fragmentation
+     Timeline: Constructible today from existing standards
+
+  3. Isogeny-based VRF
+     Pros: Small key/proof sizes
+     Cons: SIDH broken in 2022; remaining schemes immature
+     Timeline: Uncertain
+
+Fallback: Hash-chain lottery (no VRF)
+  If no PQ VRF standard emerges before quantum threat materializes:
+
+    HashChainLottery {
+        relay_id: NodeID,
+        packet_hash: Blake3Hash,
+        epoch_hash: Blake3Hash,
+        chain_link: Blake3(relay_secret || packet_hash || epoch_hash),
+        // Deterministic per (relay, packet, epoch) — no grinding
+        // relay_secret committed at epoch start via hash(relay_secret)
+        // Revealed per-epoch, verified by checking commitment
+    }
+
+    Commitment protocol:
+      1. At epoch start: relay publishes commitment = Blake3(relay_secret)
+      2. Per packet: chain_link = Blake3(relay_secret || packet_hash || epoch_hash)
+      3. Win check: chain_link < difficulty_target
+      4. At epoch end: relay reveals relay_secret for verification
+      5. All wins verified retroactively against the commitment
+
+    Properties:
+      - No wasted work (single hash per packet, not proof-of-work)
+      - Deterministic (relay cannot grind — secret is committed)
+      - Retroactive verification (cheating detected at epoch boundary)
+      - Penalty for non-reveal: forfeit all epoch earnings
+
+  This is NOT proof-of-work — it's a committed hash lottery.
+  Expected compute: 1 Blake3 hash per packet (~1 μs). No grinding.
+```
+
+**Migration path**: The VRF algorithm is negotiated per-link via the [cryptographic migration](#cryptographic-migration-special-case) three-phase process. During Phase 1 (dual support), both the current Ed25519 VRF and the new PQ VRF are accepted. During Phase 2, new channels prefer PQ VRF. Phase 3 deprecates the old VRF. Because VRF verification only involves the two channel parties (relay and sender), migration is per-channel, not network-wide — far simpler than migrating identity keys.
 
 ## Protocol Longevity
 
@@ -257,14 +309,99 @@ The economic model — free between trusted peers, paid between strangers — do
 
 ## Governance
 
-Mehr has no formal governance for protocol changes. This is deliberate — formal governance creates a political attack surface.
+Mehr has no central authority for protocol changes. Governance uses a **Mehr Enhancement Proposal (MEP)** process with trust-weighted version signaling — lightweight enough to avoid creating a political attack surface, structured enough to coordinate upgrades across a decentralized mesh.
 
-In practice, protocol changes propagate through:
+### Mehr Enhancement Proposals (MEPs)
 
-1. **Proposal**: Published as a spec change (like this documentation)
-2. **Discussion**: Community reviews and debates
-3. **Implementation**: Reference implementation updated
-4. **Adoption**: Operators choose to upgrade (or not)
-5. **Consensus**: If enough nodes adopt, it becomes the de facto standard
+Any node operator can propose a protocol change by publishing a MEP as a DataObject in MHR-Store:
 
-If the community disagrees on a change, forks are possible — and that's fine. The trust graph, not the protocol version, defines the real network. Two communities can run different protocol versions and still bridge through gateway nodes that support both.
+```
+MEP {
+    mep_number: u32,                    // sequential, claimed by publisher
+    title: String,                       // short description
+    author: NodeID,                      // proposer's identity
+    status: enum {
+        Draft,                           // under discussion
+        Proposed,                        // ready for signaling
+        Accepted,                        // ≥67% signal weight in target scope
+        Implemented,                     // reference implementation available
+        Active,                          // ≥80% of active nodes running it
+        Rejected,                        // failed to reach acceptance threshold
+        Withdrawn,                       // author withdrew
+    },
+    category: enum {
+        SoftExtension,                   // minor version bump
+        HardChange,                      // major version bump
+        CryptoMigration,                 // cryptographic algorithm change
+        Process,                         // governance process change
+    },
+    target_version: (u16, u16),          // proposed (major, minor)
+    spec_hash: Blake3Hash,               // hash of full specification document
+    reference_impl_hash: Option<Blake3Hash>, // hash of reference implementation
+    created: u64,                        // epoch
+    signature: Ed25519Signature,
+}
+```
+
+MEPs are registered via MHR-Name under `topic:mehr/meps` and propagate through normal gossip.
+
+### Trust-Weighted Version Signaling
+
+Nodes signal support for MEPs via a TLV extension in their announces:
+
+```
+VersionSignal TLV (type 0x03):
+    mep_count: u8,                       // number of MEPs signaled (max 8)
+    signals: [{
+        mep_number: u32,                 // which MEP
+        support: enum { Support, Oppose, Neutral },  // 1 byte
+    }],
+```
+
+The epoch proposer aggregates signals into a **version histogram** included in epoch proposals:
+
+```
+Version histogram (per epoch):
+    For each signaled MEP:
+        support_weight  = Σ trust_flow_weight(node) for all Supporting nodes
+        oppose_weight   = Σ trust_flow_weight(node) for all Opposing nodes
+        neutral_weight  = Σ trust_flow_weight(node) for all Neutral nodes
+        total_weight    = support_weight + oppose_weight + neutral_weight
+
+    Acceptance threshold: support_weight / total_weight ≥ 0.67
+    Rejection threshold:  oppose_weight / total_weight ≥ 0.34
+```
+
+Signaling uses trust flow weight (from the [voting](../applications/voting) TrustFlow algorithm), not node count. This prevents Sybil manipulation of governance — 50 fake nodes with 2 inbound trust edges get ~1.7 total signal weight, not 50.
+
+### Cross-Fork Compatibility
+
+When different communities run different versions:
+
+```
+Cross-fork interaction rules:
+
+    Same major version, different minor:
+        Full interoperability. Old nodes ignore new TLV extensions.
+
+    Different major versions:
+        Gateway nodes that support both versions act as bridges.
+        Bridge behavior:
+            1. Accept packets in either format
+            2. Translate between formats where possible
+            3. For untranslatable features: drop gracefully
+        Bridge nodes advertise multi-version support via capability bits.
+
+    Permanent fragmentation prevention:
+        A fork that loses >90% of trust-weighted signal is considered abandoned.
+        MEPs include a sunset_epoch — if acceptance threshold is not reached
+        within 50,000 epochs (~1 year), the MEP automatically moves to Rejected.
+        This prevents indefinite version limbo.
+```
+
+### Why This Works
+
+- **No political attack surface**: No elected committee, no foundation, no voting token. Signal weight comes from the same trust graph used for everything else.
+- **Fork-friendly**: Communities can disagree and fork. Gateway bridges maintain connectivity. The trust graph, not the protocol version, defines the real network.
+- **Partition-safe**: Version signaling is carried in announces and aggregated in epochs — both are partition-tolerant mechanisms.
+- **Lightweight**: The entire governance mechanism is a TLV extension (≤41 bytes) and a DataObject (MEP). No new protocol primitives.

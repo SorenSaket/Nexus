@@ -288,6 +288,66 @@ Gossip Bandwidth Budget (per link):
 
 This tiered model ensures constrained links are never overwhelmed by protocol overhead, while higher-bandwidth links gossip more aggressively for faster convergence.
 
+### Gossip Congestion Handling
+
+When data traffic consumes most of the available bandwidth, gossip must be protected from starvation while not overwhelming the link:
+
+```
+Gossip under congestion — enforcement rules:
+
+  Budget enforcement mechanism:
+    Each link maintains a gossip token bucket (separate from user data):
+      gossip_bucket {
+          capacity: link_bandwidth × 0.10 × window_sec,  // 10% of link BW
+          tokens: current available,
+          refill_rate: link_bandwidth × 0.10 / 8,         // bytes/sec
+          min_guaranteed_rate: max(link_bandwidth × 0.02, 10),  // 2% floor, min 10 bytes/sec
+      }
+
+  When gossip exceeds 10% budget:
+    1. THROTTLE (not drop): Gossip messages are queued in a dedicated
+       gossip queue, separate from user data queues.
+    2. Priority within gossip queue:
+       Tier 1 (routing) > Tier 2 (economic) > Tier 3 (services) > Tier 4 (social)
+       Lower-priority gossip is delayed, not dropped.
+    3. If gossip queue exceeds 50 messages: lowest-priority messages
+       are dropped (Tier 4 first, then Tier 3).
+    4. Tier 1 and Tier 2 gossip are NEVER dropped — only delayed.
+
+  Minimum guaranteed gossip rate:
+    Even at 100% data utilization, gossip receives a guaranteed minimum:
+      min_gossip_rate = max(link_bandwidth × 0.02, 10 bytes/sec)
+
+    At 1 kbps LoRa: min = 2.5 bytes/sec → ~150 bytes/minute
+      Enough for: 1 routing announce per minute (sufficient to maintain
+      direct-neighbor routes) + 1 settlement per 2 minutes
+
+    At 50 kbps LoRa: min = 125 bytes/sec → ~7.5 KB/minute
+      Enough for: full Tier 1 + Tier 2 gossip
+
+    The minimum is enforced by PREEMPTING user data packets:
+      If gossip has been starved for > 3 gossip intervals (3 minutes),
+      the next packet slot is reserved for gossip regardless of user
+      data queue depth. This prevents gossip starvation indefinitely.
+
+  Starvation detection and recovery:
+    If a node receives no gossip updates (DHT, discovery, ledger) for
+    > 10 gossip intervals (10 minutes):
+      1. Node enters GOSSIP_RECOVERY mode
+      2. Gossip budget temporarily increased to 20% of link bandwidth
+      3. User data throttled to 80% until gossip state converges
+      4. Recovery mode exits after 5 consecutive gossip rounds with
+         successful delta exchange
+
+  Priority queue scheduling (gossip vs. user data):
+    Gossip and user data share the link via weighted fair queuing:
+      gossip_weight = 10 (10% of bandwidth)
+      user_data_weight = 90 (90% of bandwidth)
+    Under congestion, both are served proportionally.
+    The min_guaranteed_rate acts as a strict floor — if weighted fair
+    queuing would starve gossip below the floor, gossip preempts.
+```
+
 ## Congestion Control
 
 User data has three layers of congestion control. Protocol gossip is handled separately by the [bandwidth budget](#bandwidth-budget).

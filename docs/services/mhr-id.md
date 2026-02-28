@@ -148,6 +148,123 @@ The per-claimant group key follows the same lifecycle as [group messaging keys](
 - **Rotation**: When the trust set changes (peer added/removed), generate new key, distribute to current set. Old keys retained so peers can decrypt previously-received claims
 - **Practical limit**: ~100 trusted peers (same as group messaging), bounded by key distribution bandwidth
 
+### Key Rotation and Claim Update Semantics
+
+When a user updates a DirectTrust or TrustNetwork claim, the interaction between group key rotation and claim versioning follows these rules:
+
+```
+Trust revocation and key rotation:
+
+  Alice revokes trust of Bob:
+    1. Alice generates new group key K_new
+    2. Alice distributes K_new to all CURRENT trusted peers (excluding Bob)
+    3. NEW claims are encrypted with K_new
+    4. OLD claims encrypted with K_old are NOT re-encrypted
+       → Bob retains access to historical claims encrypted with K_old
+       → Bob cannot read any claims encrypted with K_new
+    Rationale: Re-encrypting old claims is impractical on constrained
+    devices and creates a bandwidth storm. Historical access is acceptable
+    because Bob already saw the data when he was trusted. The security
+    property is forward secrecy: revoked peers lose access to FUTURE claims.
+
+  Alice adds trust of Carol:
+    1. Alice distributes current group key K_current to Carol via E2E envelope
+    2. Carol can decrypt all claims encrypted with K_current
+    3. Carol cannot decrypt claims encrypted with older keys
+       (unless Alice explicitly re-distributes old keys — optional)
+```
+
+### Claim Versioning
+
+Claims support monotonic versioning for updates to the same claim type and key:
+
+```
+Claim versioning rules:
+
+  Each IdentityClaim has an implicit version derived from:
+    claim_version_key = (claimant, claim_type, claim_qualifier)
+
+  Where claim_qualifier is:
+    GeoPresence:     scope string
+    CommunityMember: scope string
+    KeyRotation:     old_key hash
+    Capability:      cap_type
+    ExternalIdentity: platform + handle
+    ProfileField:    key string
+
+  Version ordering:
+    Claims with the same claim_version_key are ordered by created timestamp.
+    A newer claim (higher created timestamp) supersedes an older one.
+    Nodes that receive both keep only the newer claim.
+
+  Vouch migration:
+    Vouches reference claims by claim_hash. When a claim is superseded:
+      - Existing vouches for the old claim remain valid for that claim
+      - The new claim needs fresh vouches
+      - Vouchers are notified via MHR-Pub that the claim was updated
+      - Vouchers can publish new vouches for the updated claim
+```
+
+### Encrypted Claim Caching
+
+When a node fetches an encrypted claim but doesn't hold the decryption key:
+
+```
+Encrypted claim caching behavior:
+
+  Node receives an encrypted claim it cannot decrypt:
+    1. Store the encrypted ciphertext in local cache
+    2. Record: (claim_hash, claimant, claim_type, visibility_level)
+       — metadata is visible even for encrypted claims
+    3. Cache TTL: same as unencrypted claims (scope-based gossip TTL)
+    4. Do NOT retry decryption proactively
+
+  When to attempt re-decryption:
+    - When the node receives a new group key distribution from the claimant
+      (indicates the node was added to the trust set)
+    - The node checks all cached encrypted claims from that claimant
+      and attempts decryption with the new key
+    - Successfully decrypted claims are promoted to the readable cache
+
+  The node does NOT poll or request keys. Key distribution is push-based
+  (claimant → authorized peers). If the trust relationship changes and
+  the node receives a key, it can retroactively decrypt cached claims.
+```
+
+### Partition Key Rotation Reconciliation
+
+If two partitions both rotate group keys independently:
+
+```
+Partition key rotation reconciliation:
+
+  Scenario: Alice is in partition A, some trusted peers in partition B.
+  Both sides may rotate keys independently (e.g., Alice revokes someone
+  in partition A; a co-admin rotates in partition B for a group).
+
+  On merge:
+    1. Both key versions are valid — they encrypt different claims
+    2. Claims encrypted with K_A are decryptable by partition A peers
+    3. Claims encrypted with K_B are decryptable by partition B peers
+    4. Peers in both partitions may hold both keys
+
+  Resolution:
+    The claimant (Alice) performs a KEY UNIFICATION after merge:
+      1. Generate a fresh key K_merged
+      2. Distribute K_merged to the CURRENT trusted set (union of both partitions)
+      3. Publish new claims encrypted with K_merged
+      4. Old claims remain readable by whoever holds K_A or K_B
+
+  If the claimant is offline after merge:
+    No unification occurs. Both key lineages coexist.
+    Peers with both keys can read all claims.
+    Peers with only one key can read only that lineage's claims.
+    Unification happens whenever the claimant next comes online.
+
+  This is consistent with Mehr's eventual consistency model —
+  temporary divergence is acceptable, convergence happens naturally.
+```
+
 ## Identity Linking
 
 ExternalIdentity claims (type 4) link your Mehr identity to accounts on external platforms. Verification uses two methods inspired by [FUTO ID](https://docs.polycentric.io/futo-id/#identity-linking): crawler challenges and OAuth challenges.
