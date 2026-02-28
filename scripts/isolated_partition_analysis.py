@@ -301,7 +301,7 @@ def main():
         f.write(f"  {'N':>5s}  {'E_s/epoch':>12s}  {'Annual dilution':>16s}"
                 f"  {'Lifetime':>10s}  {'VM $/yr':>10s}\n")
         f.write(f"  {'-'*5}  {'-'*12}  {'-'*16}  {'-'*10}  {'-'*10}\n")
-        for n in [3, 10, 50, 100]:
+        for n in [3, 5, 10, 20, 50, 100, 200]:
             e_s = scaled_emission(n, start_epoch)
             annual_pct = e_s * 52_600 / supply * 100
             lt = cumulative_excess(n, start_epoch)
